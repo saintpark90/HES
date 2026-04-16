@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HES Baseball Club</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <nav class="topbar">
+        <div class="brand">
+          <span class="brand-mark">HES</span>
+          <span class="brand-text">Baseball Club</span>
+        </div>
+        <div class="topbar-links">
+          <a href="#about">모임 소개</a>
+          <a href="#schedule">일정</a>
+          <a href="#records">기록</a>
+          <a href="#join" class="button button-small">가입 문의</a>
+        </div>
+      </nav>
+
+      <section class="hero-content">
+        <div class="hero-copy">
+          <p class="eyebrow">WEEKEND BASEBALL COMMUNITY</p>
+          <h1>같이 뛰고, 같이 응원하는<br />우리 야구 모임의 홈그라운드</h1>
+          <p class="hero-description">
+            경기 일정, 출석 현황, 모임 공지, 시즌 기록까지 한눈에 볼 수 있는
+            야구 모임 메인 페이지입니다. 신입 멤버도 기존 멤버도 필요한 정보를
+            빠르게 확인할 수 있도록 구성했습니다.
+          </p>
+          <div class="hero-actions">
+            <a href="#schedule" class="button">이번 주 일정 보기</a>
+            <a href="#about" class="button button-secondary">모임 알아보기</a>
+          </div>
+          <ul class="hero-stats">
+            <li>
+              <strong>42명</strong>
+              <span>활동 멤버</span>
+            </li>
+            <li>
+              <strong>18경기</strong>
+              <span>이번 시즌 경기</span>
+            </li>
+            <li>
+              <strong>7년차</strong>
+              <span>운영 중인 모임</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="hero-panel">
+          <div class="match-card">
+            <p class="match-card-label">NEXT GAME</p>
+            <h2>HES vs Blue Hawks</h2>
+            <dl>
+              <div>
+                <dt>일시</dt>
+                <dd>4월 21일 일요일 07:30</dd>
+              </div>
+              <div>
+                <dt>장소</dt>
+                <dd>한강 시민구장 2번 필드</dd>
+              </div>
+              <div>
+                <dt>모집</dt>
+                <dd>참가 16명 / 마감 20명</dd>
+              </div>
+            </dl>
+            <div class="attendance">
+              <span>출석 현황</span>
+              <div class="attendance-bar">
+                <div class="attendance-fill"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </header>
+
+    <main>
+      <section id="about" class="section">
+        <div class="section-heading">
+          <p class="eyebrow">ABOUT CLUB</p>
+          <h2>즐겁게 야구하고 꾸준히 기록하는 모임</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>정기 경기 운영</h3>
+            <p>주말 리그전과 자체 청백전을 정기적으로 진행합니다.</p>
+          </article>
+          <article class="feature-card">
+            <h3>멤버 출결 관리</h3>
+            <p>경기별 참가 신청과 포지션 배정을 빠르게 확인할 수 있습니다.</p>
+          </article>
+          <article class="feature-card">
+            <h3>시즌 기록 보관</h3>
+            <p>타율, 경기 수, MVP 등 주요 기록을 시즌별로 모아 볼 수 있습니다.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="schedule" class="section">
+        <div class="section-heading inline">
+          <div>
+            <p class="eyebrow">THIS MONTH</p>
+            <h2>다가오는 일정</h2>
+          </div>
+          <a href="#join" class="text-link">일정 공유받기</a>
+        </div>
+
+        <div class="schedule-list">
+          <article class="schedule-item">
+            <div class="schedule-date">
+              <span>APR</span>
+              <strong>21</strong>
+            </div>
+            <div class="schedule-body">
+              <h3>연습 경기 vs Blue Hawks</h3>
+              <p>한강 시민구장 2번 필드 · 오전 7:30</p>
+            </div>
+            <span class="status-badge">참가 모집 중</span>
+          </article>
+
+          <article class="schedule-item">
+            <div class="schedule-date">
+              <span>APR</span>
+              <strong>28</strong>
+            </div>
+            <div class="schedule-body">
+              <h3>자체 청백전</h3>
+              <p>구로 베이스볼파크 · 오전 8:00</p>
+            </div>
+            <span class="status-badge muted">라인업 조정 중</span>
+          </article>
+
+          <article class="schedule-item">
+            <div class="schedule-date">
+              <span>MAY</span>
+              <strong>05</strong>
+            </div>
+            <div class="schedule-body">
+              <h3>5월 월례 모임</h3>
+              <p>모임 회의실 · 오후 6:30</p>
+            </div>
+            <span class="status-badge muted">공지 예정</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="records" class="section records">
+        <div class="section-heading">
+          <p class="eyebrow">SEASON SNAPSHOT</p>
+          <h2>이번 시즌 주요 기록</h2>
+        </div>
+
+        <div class="record-grid">
+          <article class="record-card">
+            <span>팀 승률</span>
+            <strong>0.683</strong>
+            <p>15경기 10승 1무 4패</p>
+          </article>
+          <article class="record-card">
+            <span>최다 안타</span>
+            <strong>김태훈</strong>
+            <p>23 Hits</p>
+          </article>
+          <article class="record-card">
+            <span>최다 타점</span>
+            <strong>박민수</strong>
+            <p>18 RBI</p>
+          </article>
+          <article class="record-card">
+            <span>방어율 1위</span>
+            <strong>이준호</strong>
+            <p>ERA 2.14</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="join" class="section join-banner">
+        <div>
+          <p class="eyebrow">JOIN HES</p>
+          <h2>함께 뛰고 싶은 새 멤버를 기다립니다</h2>
+          <p>
+            초보자부터 경력자까지 환영합니다. 일정 공유와 가입 안내를 원하면
+            아래 버튼으로 문의를 시작해보세요.
+          </p>
+        </div>
+        <a href="mailto:hes-baseball@example.com" class="button">가입 문의하기</a>
+      </section>
+    </main>
+  </div>
+
+  <script src="./script.js"></script>
+</body>
+</html>
