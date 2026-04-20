@@ -49,6 +49,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, str]]:
             home_starter = (game.get("B_PIT_P_NM") or "").strip() or "미정"
 
             return {
+                "season_id": str(game.get("SEASON_ID", "")),
                 "game_date": game.get("G_DT_TXT", ""),
                 "game_time": game.get("G_TM", ""),
                 "stadium": game.get("S_NM", ""),
@@ -60,5 +61,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, str]]:
                 "hanwha_starter": hanwha_starter,
                 "away_starter": away_starter,
                 "home_starter": home_starter,
+                "away_starter_id": str(game.get("T_PIT_P_ID") or ""),
+                "home_starter_id": str(game.get("B_PIT_P_ID") or ""),
             }
     return None
