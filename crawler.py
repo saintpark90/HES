@@ -51,20 +51,20 @@ def _clean_html_text(value: str) -> str:
     return text.replace("&nbsp;", " ").strip()
 
 
-def _extract_table_row(html: str, header_name: str) -> Dict[str, str]:
-    table_re = rf"<table[^>]*>.*?<th[^>]*>{header_name}</th>.*?</table>"
-    match = re.search(table_re, html, re.S)
-    if not match:
-        return {}
-
-    table_html = match.group(0)
-    headers = [_clean_html_text(h) for h in re.findall(r"<th[^>]*>(.*?)</th>", table_html, re.S)]
-    row_match = re.search(r"<tbody[^>]*>\s*<tr[^>]*>(.*?)</tr>", table_html, re.S)
-    if not row_match:
-        return {}
-
-    cells = [_clean_html_text(c) for c in re.findall(r"<td[^>]*>(.*?)</td>", row_match.group(1), re.S)]
-    return {headers[idx]: cells[idx] for idx in range(min(len(headers), len(cells)))}
+def _parse_stat_tables(html: str) -> list[dict[str, str]]:
+    """Parse every <table> in html and return list of header→first-row-value dicts."""
+    flat = html.replace("\n", " ")
+    result = []
+    for table_html in re.findall(r"<table[^>]*>.*?</table>", flat, re.S):
+        headers = [_clean_html_text(h) for h in re.findall(r"<th[^>]*>(.*?)</th>", table_html, re.S)]
+        if not headers:
+            continue
+        for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, re.S):
+            cells = [_clean_html_text(c) for c in re.findall(r"<td[^>]*>(.*?)</td>", row_html, re.S)]
+            if cells:
+                result.append({headers[i]: cells[i] for i in range(min(len(headers), len(cells)))})
+                break  # only first data row per table
+    return result
 
 
 def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
@@ -78,12 +78,19 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
     except Exception:
         return {}
 
-    basic = _extract_table_row(html, "ERA")
-    advanced = _extract_table_row(html, "SAC")
+    tables = _parse_stat_tables(html)
+
+    basic: Dict[str, str] = {}
+    advanced: Dict[str, str] = {}
+    for t in tables:
+        if "ERA" in t and not basic:
+            basic = t
+        if "WHIP" in t and not advanced:
+            advanced = t
 
     return {
         "era": basic.get("ERA", "-"),
-        "war": "-",  # KBO pitcher detail page does not expose WAR.
+        "war": "-",  # KBO 투수 상세 페이지에서 WAR를 제공하지 않음
         "games": basic.get("G", "-"),
         "avg_innings": basic.get("IP", "-"),
         "qs": advanced.get("QS", "-"),
