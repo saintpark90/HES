@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ og.title if og else '한화 이글스 다음 경기 정보' }}</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="{{ og.title if og else '한화 이글스 다음 경기 정보' }}" />
+    <meta property="og:description" content="{{ og.description if og else '' }}" />
+    <meta property="og:url" content="{{ og.url if og else '' }}" />
+    <meta property="og:image" content="{{ og.image if og else '' }}" />
+    <meta property="og:site_name" content="한화 이글스 경기 알림" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{ og.title if og else '한화 이글스 다음 경기 정보' }}" />
+    <meta name="twitter:description" content="{{ og.description if og else '' }}" />
+    <meta name="twitter:image" content="{{ og.image if og else '' }}" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 760px;
+            margin: 40px auto;
+            padding: 0 16px;
+            line-height: 1.5;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        h1 {
+            margin-top: 0;
+            color: #ff6600;
+        }
+        .row {
+            margin: 8px 0;
+        }
+        .label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+        .sub {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #eee;
+            color: #333;
+        }
+        .share {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #555;
+        }
+        .share a {
+            color: #0057c2;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>한화 이글스 다음 경기</h1>
+
+        {% if game_info %}
+        <div class="row"><span class="label">경기일:</span>{{ game_info.game_date }}</div>
+        <div class="row"><span class="label">경기시간:</span>{{ game_info.game_time }}</div>
+        <div class="row"><span class="label">대진:</span>{{ game_info.matchup }}</div>
+        <div class="row"><span class="label">구장:</span>{{ game_info.stadium }}</div>
+        <div class="row"><span class="label">한화 홈/원정:</span>{{ game_info.hanwha_home_away }}</div>
+        <div class="row"><span class="label">상대팀:</span>{{ game_info.opponent }}</div>
+        <div class="row"><span class="label">한화 선발투수:</span>{{ game_info.hanwha_starter }}</div>
+
+        <div class="sub">
+            <div class="row"><span class="label">원정팀 선발:</span>{{ game_info.away_starter }}</div>
+            <div class="row"><span class="label">홈팀 선발:</span>{{ game_info.home_starter }}</div>
+        </div>
+        {% else %}
+        <p>가까운 일정에서 한화 이글스 경기 정보를 찾지 못했습니다.</p>
+        {% endif %}
+
+        <div class="share">
+            카카오톡 공유 URL: <a href="{{ og.url if og else '#' }}">{{ og.url if og else '' }}</a>
+        </div>
+    </div>
+</body>
+</html>
