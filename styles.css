@@ -36,6 +36,52 @@ h1 {
   color: #333;
 }
 
+.pitcher-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.pitcher-card {
+  border: 1px solid #e7e7e7;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.pitcher-card img {
+  width: 100%;
+  height: 230px;
+  object-fit: cover;
+  display: block;
+  background: #f0f0f0;
+}
+
+.pitcher-body {
+  padding: 10px 12px 12px;
+}
+
+.pitcher-body h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  row-gap: 6px;
+  column-gap: 8px;
+  align-items: center;
+}
+
+.stats-grid span {
+  color: #666;
+}
+
+.stats-grid strong {
+  text-align: right;
+}
+
 .share-note {
   margin-top: 20px;
   font-size: 14px;
