@@ -8,9 +8,11 @@ from typing import Any, Dict, Optional
 import requests
 
 KBO_GAME_LIST_URL = "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList"
+KBO_TEAM_RECORD_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetTeamRecord"
 HANWHA_TEAM_ID = "HH"
 SERIES_IDS = "0,1,3,4,5,6,7,9"
 KBO_IMAGE_BASE = "https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/person/middle"
+KBO_EMBLEM_BASE = "https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/emblem/regular"
 PITCHER_DETAIL_URL = "https://www.koreabaseball.com/Record/Player/PitcherDetail/Basic.aspx"
 
 
@@ -67,6 +69,69 @@ def _parse_stat_tables(html: str) -> list[dict[str, str]]:
     return result
 
 
+def _parse_team_record_row(row: list) -> Dict[str, str]:
+    """row is the list of cell dicts from GetTeamRecord JSON."""
+    def text(idx: int) -> str:
+        if idx >= len(row):
+            return "-"
+        return re.sub(r"<[^>]+>", "", row[idx].get("Text", "") or "").strip() or "-"
+
+    def is_win(idx: int) -> bool:
+        if idx >= len(row):
+            return False
+        return (row[idx].get("Class") or "") == "win"
+
+    return {
+        "season_record": text(1),
+        "last5": text(2),
+        "era": text(3),
+        "era_win": is_win(3),
+        "avg": text(4),
+        "avg_win": is_win(4),
+        "runs_scored": text(5),
+        "runs_scored_win": is_win(5),
+        "runs_allowed": text(6),
+        "runs_allowed_win": is_win(6),
+    }
+
+
+def _fetch_team_comparison(game_id: str, season_id: str, away_id: str, home_id: str) -> Dict[str, Any]:
+    """Fetch team season stats from KBO GetTeamRecord endpoint."""
+    if not game_id:
+        return {}
+
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"}
+    payload = {
+        "leId": "1",
+        "srId": "0",
+        "seasonId": season_id or str(date.today().year),
+        "gameId": game_id,
+        "groupSc": "SEASON",
+    }
+
+    try:
+        resp = requests.post(KBO_TEAM_RECORD_URL, data=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = json.loads(resp.content.decode("utf-8-sig"))
+    except Exception:
+        return {}
+
+    rows = data.get("rows", [])
+    if len(rows) < 2:
+        return {}
+
+    away_row = rows[0].get("row", [])
+    home_row = rows[1].get("row", [])
+
+    emblem_year = season_id or str(date.today().year)
+    return {
+        "away": _parse_team_record_row(away_row),
+        "home": _parse_team_record_row(home_row),
+        "away_emblem": f"{KBO_EMBLEM_BASE}/{emblem_year}/emblem_{away_id}.png",
+        "home_emblem": f"{KBO_EMBLEM_BASE}/{emblem_year}/emblem_{home_id}.png",
+    }
+
+
 def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
     if not player_id:
         return {}
@@ -119,9 +184,14 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, str]]:
             season_id = str(game.get("SEASON_ID", ""))
             away_starter_stats = _fetch_pitcher_stats(away_starter_id)
             home_starter_stats = _fetch_pitcher_stats(home_starter_id)
+            game_id = str(game.get("G_ID", ""))
+            away_team_id = str(game.get("AWAY_ID", ""))
+            home_team_id = str(game.get("HOME_ID", ""))
+            team_comparison = _fetch_team_comparison(game_id, season_id, away_team_id, home_team_id)
 
             return {
                 "season_id": season_id,
+                "game_id": game_id,
                 "game_date": game.get("G_DT_TXT", ""),
                 "game_time": game.get("G_TM", ""),
                 "stadium": game.get("S_NM", ""),
@@ -139,5 +209,6 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, str]]:
                 "home_starter_image": _face_image_url(season_id, home_starter_id) if home_starter_id else "",
                 "away_starter_stats": away_starter_stats,
                 "home_starter_stats": home_starter_stats,
+                "team_comparison": team_comparison,
             }
     return None

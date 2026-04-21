@@ -90,6 +90,103 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── 팀 전력 비교 ─────────────────────────────────── */
+.cmp-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.cmp-title {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: #ff6600;
+}
+
+.cmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.cmp-table thead th {
+  padding: 8px 4px 12px;
+  text-align: center;
+  font-weight: bold;
+}
+
+.cmp-team {
+  display: table-cell;
+  width: 38%;
+  text-align: center;
+}
+
+.cmp-team .emblem {
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  margin: 0 auto 4px;
+}
+
+.cmp-team span {
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.cmp-label-head {
+  width: 24%;
+}
+
+.cmp-table tbody tr {
+  border-top: 1px solid #f0f0f0;
+}
+
+.cmp-table tbody tr:first-child {
+  border-top: 2px solid #eee;
+}
+
+.cmp-val {
+  width: 38%;
+  text-align: center;
+  padding: 8px 4px;
+  font-variant-numeric: tabular-nums;
+  color: #444;
+}
+
+.cmp-val.cmp-win {
+  color: #d14000;
+  font-weight: bold;
+}
+
+.cmp-label {
+  width: 24%;
+  text-align: center;
+  padding: 8px 2px;
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+}
+
+/* 최근 5경기 결과 점 */
+.dot {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: bold;
+  text-align: center;
+  margin: 0 1px;
+  color: #fff;
+}
+
+.dot.win  { background: #e84040; }
+.dot.loss { background: #4c6ef5; }
+.dot.draw { background: #aaa; }
+
+/* ── 공유 노트 ────────────────────────────────────── */
 .share-note {
   margin-top: 20px;
   font-size: 14px;
