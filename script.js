@@ -7,7 +7,7 @@ if (!container) throw new Error("game-content container not found");
 
 const renderPitcherCard = (teamLabel, name, image, stats) => `
     <article class="pitcher-card">
-      <img src="${image || "./thumbnail.jpg"}" alt="${name} 선수 사진" loading="lazy" />
+      <img src="${image || "./thumbnail.png"}" alt="${name} 선수 사진" loading="lazy" />
       <div class="pitcher-body">
         <h3>${teamLabel}: ${name}</h3>
         <div class="starter-record">시즌 승/패: ${stats?.wins || "-"}승 ${stats?.losses || "-"}패</div>

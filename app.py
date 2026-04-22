@@ -83,6 +83,7 @@ def _upscale_locally_base64(image_url: str, scale: int, sharpness: float = 1.3) 
 
 def _build_og_context(game_info: dict | None) -> dict:
     share_url = request.url_root.rstrip("/") + url_for("share_hanwha_next")
+    fixed_thumb_url = request.url_root.rstrip("/") + url_for("thumbnail_png")
 
     if game_info:
         title = f"한화 다음 경기: {game_info['matchup']}"
@@ -90,12 +91,11 @@ def _build_og_context(game_info: dict | None) -> dict:
             f"{game_info['game_date']} {game_info['game_time']} | "
             f"한화 선발: {game_info['hanwha_starter']} | 상대팀: {game_info['opponent']}"
         )
-        thumb_text = f"한화 다음 경기 | {game_info['matchup']} | 선발 {game_info['hanwha_starter']}"
-        image_url = request.url_root.rstrip("/") + url_for("thumbnail_image", text=thumb_text)
+        image_url = fixed_thumb_url
     else:
         title = "한화 다음 경기 정보"
         description = "현재 한화 이글스의 다음 경기 정보를 찾을 수 없습니다."
-        image_url = request.url_root.rstrip("/") + url_for("thumbnail_image", text=title)
+        image_url = fixed_thumb_url
 
     return {
         "title": title,
@@ -152,6 +152,11 @@ def thumbnail_image():
 <text x="80" y="550" fill="#9b9b9b" font-size="30" font-family="Arial, sans-serif">koreabaseball.com data</text>
 </svg>"""
     return app.response_class(svg, mimetype="image/svg+xml")
+
+
+@app.get("/thumbnail.png")
+def thumbnail_png():
+    return send_from_directory(app.root_path, "thumbnail.png")
 
 
 @app.get("/styles.css")
