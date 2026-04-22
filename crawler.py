@@ -85,11 +85,13 @@ def _is_finished_game(game: Dict[str, Any]) -> bool:
 
 
 def _is_live_game(game: Dict[str, Any]) -> bool:
-    return str(game.get("GAME_STATE_SC", "")) in {"2", "3"}
+    # GAME_STATE_SC:
+    # 1: 예정, 2: 경기중, 3/4: 종료(데이터 반영 상태에 따라 다름)
+    return str(game.get("GAME_STATE_SC", "")) == "2"
 
 
 def _is_final_game(game: Dict[str, Any]) -> bool:
-    return str(game.get("GAME_STATE_SC", "")) == "4"
+    return str(game.get("GAME_STATE_SC", "")) in {"3", "4"}
 
 
 def _build_live_status(game: Dict[str, Any], away_team: str, home_team: str) -> Dict[str, Any]:
