@@ -19,6 +19,66 @@ h1 {
   color: #ff6600;
 }
 
+.updated-at {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #777;
+}
+
+.live-header {
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: #fff8f3;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.live-team {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.live-team:last-of-type {
+  justify-content: flex-end;
+}
+
+.live-emblem {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.live-score-wrap {
+  text-align: center;
+}
+
+.live-score {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.live-inning {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #a64e22;
+}
+
+.live-players {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #6a381d;
+}
+
 .row {
   margin: 8px 0;
 }
@@ -57,6 +117,7 @@ h1 {
   object-position: top center;
   display: block;
   background: #f0f0f0;
+  image-rendering: auto;
 }
 
 .pitcher-body {
@@ -69,6 +130,13 @@ h1 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.starter-record {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #d14000;
+  font-weight: 700;
 }
 
 .stats-grid {
@@ -95,6 +163,34 @@ h1 {
   margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid #eee;
+}
+
+.h2h-section,
+.rank-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.h2h-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.h2h-card {
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.h2h-card span {
+  font-weight: 700;
+  color: #d14000;
 }
 
 .cmp-title {
@@ -196,4 +292,42 @@ h1 {
 .share-note a {
   color: #0057c2;
   word-break: break-all;
+}
+
+.rank-table-wrap {
+  overflow-x: auto;
+}
+
+.rank-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rank-table th,
+.rank-table td {
+  border-top: 1px solid #eee;
+  padding: 7px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.rank-table th {
+  background: #fafafa;
+  border-top: 2px solid #e5e5e5;
+  font-size: 12px;
+  color: #666;
+}
+
+.rank-team {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-start;
+}
+
+.rank-emblem {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
 }

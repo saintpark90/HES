@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -67,6 +68,7 @@ def build() -> None:
             "__GAME_JSON__",
             json.dumps(game_info if has_game else None, ensure_ascii=False),
         )
+        .replace("__UPDATED_AT__", datetime.now().replace(microsecond=0).isoformat())
     )
     OUTPUT_PATH.write_text(rendered, encoding="utf-8")
 
