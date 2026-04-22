@@ -410,6 +410,10 @@ def _fetch_team_rank_daily() -> Dict[str, Any]:
         for item in season_team_stats:
             team_id = str(item.get("teamId", "") or "")
             win_rate = item.get("wra")
+            emblem_team_id = team_id or TEAM_NAME_TO_ID.get(_safe_text(item.get("teamName")), "")
+            emblem_url = (
+                f"{KBO_EMBLEM_BASE}/{season}/emblem_{emblem_team_id}.png" if emblem_team_id else ""
+            )
             rankings.append(
                 {
                     "rank": _safe_text(item.get("ranking")),
@@ -423,7 +427,7 @@ def _fetch_team_rank_daily() -> Dict[str, Any]:
                     "games_behind": _safe_text(item.get("gameBehind")),
                     "last10": last10_by_team.get(team_id, "-"),
                     "streak": _safe_text(item.get("continuousGameResult")),
-                    "emblem": str(item.get("teamImageUrl", "") or ""),
+                    "emblem": emblem_url,
                 }
             )
     except Exception:
