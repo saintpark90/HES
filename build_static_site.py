@@ -68,7 +68,7 @@ def build() -> None:
             "__GAME_JSON__",
             json.dumps(game_info if has_game else None, ensure_ascii=False),
         )
-        .replace("__UPDATED_AT__", datetime.now().replace(microsecond=0).isoformat())
+        .replace("__UPDATED_AT_VALUE__", datetime.now().replace(microsecond=0).isoformat())
     )
     OUTPUT_PATH.write_text(rendered, encoding="utf-8")
 
