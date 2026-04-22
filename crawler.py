@@ -18,6 +18,11 @@ KBO_EMBLEM_BASE = "https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/emblem/regul
 PITCHER_DETAIL_URL = "https://www.koreabaseball.com/Record/Player/PitcherDetail/Basic.aspx"
 KBO_TEAM_RANK_DAILY_URL = "https://www.koreabaseball.com/Record/TeamRank/TeamRankDaily.aspx"
 KBO_LIVETEXT_VIEW2_URL = "https://www.koreabaseball.com/Game/LiveTextView2.aspx"
+NAVER_SPORTS_API_BASE = "https://api-gw.sports.naver.com"
+NAVER_KBO_TEAM_RANK_URL = NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/seasons/{season}/teams"
+NAVER_KBO_LAST10_URL = (
+    NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/seasons/{season}/teams/last-ten-games"
+)
 
 TEAM_NAME_TO_ID = {
     "KT": "KT",
@@ -357,7 +362,74 @@ def _resolve_pitcher_id_from_search(player_name: str, team_id: str) -> str:
 
 
 def _fetch_team_rank_daily() -> Dict[str, Any]:
-    """Fetch current KBO team rank and head-to-head matrix from TeamRankDaily page."""
+    """Fetch team rankings from Naver Sports API and head-to-head from KBO page."""
+    season = str(date.today().year)
+    naver_headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://m.sports.naver.com/",
+    }
+
+    rankings: list[dict[str, str]] = []
+    rank_date = datetime.now().strftime("%Y.%m.%d")
+    try:
+        ranking_resp = requests.get(
+            NAVER_KBO_TEAM_RANK_URL.format(season=season),
+            timeout=10,
+            headers=naver_headers,
+        )
+        ranking_resp.raise_for_status()
+        ranking_payload = ranking_resp.json()
+        season_team_stats = (
+            (ranking_payload.get("result") or {}).get("seasonTeamStats") or []
+        )
+
+        last10_resp = requests.get(
+            NAVER_KBO_LAST10_URL.format(season=season),
+            timeout=10,
+            headers=naver_headers,
+        )
+        last10_resp.raise_for_status()
+        last10_payload = last10_resp.json()
+        last10_stats = (
+            (last10_payload.get("result") or {}).get("seasonTeamLastTenGameStats") or []
+        )
+        def _safe_text(value: Any) -> str:
+            return "-" if value is None or value == "" else str(value)
+
+        last10_by_team: Dict[str, str] = {}
+        for item in last10_stats:
+            team_id = str(item.get("teamId", "") or "")
+            win = item.get("lastTenGameWinGameCount")
+            draw = item.get("lastTenGameDrawnGameCount")
+            lose = item.get("lastTenGameLoseGameCount")
+            if win is not None and draw is not None and lose is not None:
+                last10_by_team[team_id] = f"{win}승 {draw}무 {lose}패"
+            else:
+                last10_by_team[team_id] = _safe_text(item.get("lastTenGameResult"))
+
+        for item in season_team_stats:
+            team_id = str(item.get("teamId", "") or "")
+            win_rate = item.get("wra")
+            rankings.append(
+                {
+                    "rank": _safe_text(item.get("ranking")),
+                    "team_name": _safe_text(item.get("teamName")),
+                    "team_id": team_id,
+                    "games": _safe_text(item.get("gameCount")),
+                    "wins": _safe_text(item.get("winGameCount")),
+                    "losses": _safe_text(item.get("loseGameCount")),
+                    "draws": _safe_text(item.get("drawnGameCount")),
+                    "win_rate": f"{float(win_rate):.3f}" if win_rate is not None else "-",
+                    "games_behind": _safe_text(item.get("gameBehind")),
+                    "last10": last10_by_team.get(team_id, "-"),
+                    "streak": _safe_text(item.get("continuousGameResult")),
+                    "emblem": str(item.get("teamImageUrl", "") or ""),
+                }
+            )
+    except Exception:
+        rankings = []
+
+    # Keep using KBO matrix for head-to-head summary in team comparison card.
     try:
         response = requests.get(
             KBO_TEAM_RANK_DAILY_URL,
@@ -369,42 +441,9 @@ def _fetch_team_rank_daily() -> Dict[str, Any]:
     except Exception:
         return {"rankings": [], "head_to_head": [], "rank_date": ""}
 
-    # Date label usually appears as 2026.04.21 format.
-    rank_date = ""
-    page_text = soup.get_text(" ", strip=True)
-    date_match = re.search(r"(20\d{2}\.\d{2}\.\d{2})", page_text)
-    if date_match:
-        rank_date = date_match.group(1)
-
     tables = soup.find_all("table")
     if len(tables) < 2:
-        return {"rankings": [], "head_to_head": [], "rank_date": rank_date}
-
-    rankings: list[dict[str, str]] = []
-    rankings_table = tables[0]
-    for tr in rankings_table.find_all("tr"):
-        tds = tr.find_all("td")
-        if len(tds) < 10:
-            continue
-        team_name = tds[1].get_text(" ", strip=True)
-        team_id = TEAM_NAME_TO_ID.get(team_name, "")
-        emblem_year = str(datetime.now().year)
-        rankings.append(
-            {
-                "rank": tds[0].get_text(" ", strip=True),
-                "team_name": team_name,
-                "team_id": team_id,
-                "games": tds[2].get_text(" ", strip=True),
-                "wins": tds[3].get_text(" ", strip=True),
-                "losses": tds[4].get_text(" ", strip=True),
-                "draws": tds[5].get_text(" ", strip=True),
-                "win_rate": tds[6].get_text(" ", strip=True),
-                "games_behind": tds[7].get_text(" ", strip=True),
-                "last10": tds[8].get_text(" ", strip=True),
-                "streak": tds[9].get_text(" ", strip=True),
-                "emblem": f"{KBO_EMBLEM_BASE}/{emblem_year}/emblem_{team_id}.png" if team_id else "",
-            }
-        )
+        return {"rankings": rankings, "head_to_head": [], "rank_date": rank_date}
 
     head_to_head: list[dict[str, str]] = []
     h2h_table = tables[1]
