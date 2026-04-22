@@ -3,6 +3,7 @@ import io
 import os
 from datetime import datetime
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import requests
 from flask import Flask, jsonify, render_template, request, send_from_directory, url_for
@@ -15,6 +16,7 @@ app = Flask(__name__)
 REPLICATE_API_BASE = "https://api.replicate.com/v1"
 REPLICATE_MODEL_OWNER = os.getenv("REPLICATE_MODEL_OWNER", "nightmareai")
 REPLICATE_MODEL_NAME = os.getenv("REPLICATE_MODEL_NAME", "real-esrgan")
+KST = ZoneInfo("Asia/Seoul")
 
 
 def _download_image_bytes(image_url: str) -> bytes:
@@ -106,7 +108,7 @@ def _build_og_context(game_info: dict | None) -> dict:
 
 
 def _now_iso() -> str:
-    return datetime.now().replace(microsecond=0).isoformat()
+    return datetime.now(KST).replace(microsecond=0).isoformat()
 
 
 @app.get("/")

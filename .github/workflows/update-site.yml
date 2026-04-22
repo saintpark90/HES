@@ -33,6 +33,8 @@ jobs:
 
       - name: Decide whether this run should update
         id: gate
+        env:
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           python - <<'PY'
           import os
@@ -41,6 +43,7 @@ jobs:
           from crawler import get_next_hanwha_game
 
           event_name = os.getenv("GITHUB_EVENT_NAME", "")
+          event_schedule = os.getenv("EVENT_SCHEDULE", "")
           now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
           game_info = get_next_hanwha_game() or {}
           live = game_info.get("live_status", {}) if game_info else {}
@@ -54,19 +57,21 @@ jobs:
           reason = "non-scheduled event"
 
           if event_name == "schedule":
-              # Scheduled runs should update if:
-              # 1) today's game is in/after live window, or
-              # 2) game is currently live, or
-              # 3) game just finished (one more refresh to switch to next game).
-              should_run = (
-                  (is_today_game and in_live_window)
-                  or is_live
-                  or is_final
-              )
-              reason = (
-                  f"today_game={is_today_game}, in_live_window={in_live_window}, "
-                  f"is_live={is_live}, is_final={is_final}"
-              )
+              if event_schedule == "0 */6 * * *":
+                  should_run = True
+                  reason = "regular 6h refresh"
+              else:
+                  # Minute-level schedules run only when game-day/live conditions match.
+                  should_run = (
+                      (is_today_game and in_live_window)
+                      or is_live
+                      or is_final
+                  )
+                  reason = (
+                      f"minute window gate: today_game={is_today_game}, "
+                      f"in_live_window={in_live_window}, is_live={is_live}, "
+                      f"is_final={is_final}"
+                  )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"should_run={'true' if should_run else 'false'}\n")
