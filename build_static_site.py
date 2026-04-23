@@ -10,12 +10,14 @@ from crawler import get_next_hanwha_game
 ROOT = Path(__file__).parent
 TEMPLATE_PATH = ROOT / "index.template.html"
 OUTPUT_PATH = ROOT / "index.html"
+DATA_OUTPUT_PATH = ROOT / "game-data.json"
 KST = ZoneInfo("Asia/Seoul")
 
 
 def build() -> None:
     game_info = get_next_hanwha_game() or {}
     has_game = bool(game_info)
+    updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 
     if has_game:
         og_title = f"{game_info['game_date']} {game_info['matchup']}"
@@ -34,10 +36,17 @@ def build() -> None:
         )
         .replace(
             "__UPDATED_AT_VALUE__",
-            datetime.now(KST).replace(microsecond=0).isoformat(),
+            updated_at,
         )
     )
     OUTPUT_PATH.write_text(rendered, encoding="utf-8")
+    DATA_OUTPUT_PATH.write_text(
+        json.dumps(
+            {"ok": True, "game_info": game_info if has_game else None, "updated_at": updated_at},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

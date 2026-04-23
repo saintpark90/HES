@@ -40,7 +40,7 @@ jobs:
           import os
           from datetime import datetime, time
           from zoneinfo import ZoneInfo
-          from crawler import get_next_hanwha_game
+          from crawler import get_next_hanwha_game, has_hanwha_game_on_date
 
           event_name = os.getenv("GITHUB_EVENT_NAME", "")
           event_schedule = os.getenv("EVENT_SCHEDULE", "")
@@ -49,6 +49,7 @@ jobs:
           live = game_info.get("live_status", {}) if game_info else {}
           game_date = game_info.get("game_date_ymd", "")
           is_today_game = game_date == now_kst.strftime("%Y-%m-%d")
+          has_today_hanwha_game = has_hanwha_game_on_date(now_kst.date())
           in_live_window = now_kst.time() >= time(18, 30) or now_kst.time() <= time(1, 59)
           is_live = bool(live.get("is_live"))
           is_final = bool(live.get("is_final"))
@@ -63,12 +64,13 @@ jobs:
               else:
                   # Minute-level schedules run only when game-day/live conditions match.
                   should_run = (
-                      (is_today_game and in_live_window)
+                      (has_today_hanwha_game and in_live_window)
                       or is_live
                       or is_final
                   )
                   reason = (
-                      f"minute window gate: today_game={is_today_game}, "
+                      f"minute window gate: has_today_hanwha_game={has_today_hanwha_game}, "
+                      f"next_game_today={is_today_game}, "
                       f"in_live_window={in_live_window}, is_live={is_live}, "
                       f"is_final={is_final}"
                   )
@@ -93,7 +95,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.html thumbnail.png
+          git add index.html thumbnail.png game-data.json
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else

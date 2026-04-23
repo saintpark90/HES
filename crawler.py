@@ -487,6 +487,14 @@ def _find_head_to_head_record(
     return {"away_vs_home": away_vs_home, "home_vs_away": home_vs_away}
 
 
+def has_hanwha_game_on_date(target_date: date) -> bool:
+    try:
+        games = _fetch_games(target_date)
+    except Exception:
+        return False
+    return any(_is_hanwha_game(game) for game in games)
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     today = date.today()

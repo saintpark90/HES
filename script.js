@@ -2,6 +2,8 @@ let game = window.__NEXT_GAME__;
 let updatedAt = window.__UPDATED_AT__ || "";
 const container = document.getElementById("game-content");
 let pollTimer = null;
+let schedulerTimer = null;
+let lastWindowProbeDate = "";
 
 if (!container) throw new Error("game-content container not found");
 
@@ -189,16 +191,20 @@ const renderGame = (g, refreshedAt) => {
 };
 
 const shouldStartPolling = (g) => {
-  if (!g || g?.live_status?.is_final) return false;
+  if (!g) return false;
   if (g?.live_status?.is_live) return true;
-  if (!g.game_date_ymd) return false;
 
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  if (g.game_date_ymd !== today) return false;
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayKst = nowKst.toISOString().slice(0, 10);
+  const minutesKst = nowKst.getUTCHours() * 60 + nowKst.getUTCMinutes();
+  const inLiveWindow = minutesKst >= (18 * 60 + 30) || minutesKst <= (1 * 60 + 59);
 
-  const start = new Date(`${today}T18:30:00`);
-  return now >= start;
+  // Keep polling in KST live window when today's game exists
+  // or while final state is still settling into next game data.
+  return (
+    inLiveWindow &&
+    (g.game_date_ymd === todayKst || Boolean(g?.live_status?.is_final))
+  );
 };
 
 const stopPolling = () => {
@@ -210,14 +216,31 @@ const stopPolling = () => {
 
 const refreshGameInfo = async () => {
   try {
-    const response = await fetch("/api/game-info", { cache: "no-store" });
-    if (!response.ok) return;
-    const payload = await response.json();
+    let payload = null;
+
+    // Dynamic backend path (Flask)
+    try {
+      const response = await fetch("/api/game-info", { cache: "no-store" });
+      if (response.ok) {
+        payload = await response.json();
+      }
+    } catch (err) {
+      // Fall through to static payload for GitHub Pages.
+    }
+
+    // Static fallback path (GitHub Pages)
+    if (!payload?.ok) {
+      const fallbackResponse = await fetch(`./game-data.json?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (!fallbackResponse.ok) return;
+      payload = await fallbackResponse.json();
+    }
+
     if (!payload?.ok) return;
-    game = payload.game_info;
+    game = payload.game_info || null;
     updatedAt = payload.updated_at || new Date().toISOString();
     renderGame(game, updatedAt);
-    if (game?.live_status?.is_final) stopPolling();
   } catch (err) {
     // Keep last rendered data when a transient refresh failure happens.
     console.debug("live refresh failed", err);
@@ -226,10 +249,29 @@ const refreshGameInfo = async () => {
 
 const startPolling = () => {
   if (pollTimer) return;
+  refreshGameInfo();
   pollTimer = setInterval(refreshGameInfo, 60 * 1000);
 };
 
+const schedulerTick = () => {
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayKst = nowKst.toISOString().slice(0, 10);
+  const minutesKst = nowKst.getUTCHours() * 60 + nowKst.getUTCMinutes();
+  const inLiveWindow = minutesKst >= (18 * 60 + 30) || minutesKst <= (1 * 60 + 59);
+
+  // At live window start, probe once even if current data is stale.
+  if (inLiveWindow && lastWindowProbeDate !== todayKst) {
+    lastWindowProbeDate = todayKst;
+    refreshGameInfo();
+  }
+
+  if (shouldStartPolling(game)) {
+    startPolling();
+  } else {
+    stopPolling();
+  }
+};
+
 renderGame(game, updatedAt);
-if (shouldStartPolling(game)) {
-  startPolling();
-}
+schedulerTick();
+schedulerTimer = setInterval(schedulerTick, 30 * 1000);
