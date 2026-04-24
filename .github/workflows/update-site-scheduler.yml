@@ -88,6 +88,8 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import subprocess
+          import time
           from datetime import datetime, timezone
 
           now_utc = datetime.now(timezone.utc)
@@ -95,24 +97,17 @@ jobs:
 
           # Continue chaining only in active UTC window (KST 10:00~23:59).
           if not (1 <= hour_utc <= 14):
-              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-                  f.write("CHAIN_NEXT=false\n")
+              print("Skip chaining: outside active UTC window")
               raise SystemExit(0)
 
           sec_to_next_5 = ((5 - (now_utc.minute % 5)) % 5) * 60 - now_utc.second
           if sec_to_next_5 <= 0:
               sec_to_next_5 += 300
 
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-              f.write("CHAIN_NEXT=true\n")
-              f.write(f"SLEEP_SECONDS={sec_to_next_5}\n")
+          print(f"Sleeping {sec_to_next_5}s before next dispatch")
+          time.sleep(sec_to_next_5)
+          subprocess.run(
+              ["gh", "workflow", "run", os.environ["GITHUB_WORKFLOW"], "--ref", os.environ["GITHUB_REF_NAME"]],
+              check=True,
+          )
           PY
-
-          if [ "$CHAIN_NEXT" != "true" ]; then
-            echo "Skip chaining: outside active KST window"
-            exit 0
-          fi
-
-          echo "Sleeping ${SLEEP_SECONDS}s before next dispatch"
-          sleep "${SLEEP_SECONDS}"
-          gh workflow run "${GITHUB_WORKFLOW}" --ref "${GITHUB_REF_NAME}"
