@@ -14,8 +14,39 @@ DATA_OUTPUT_PATH = ROOT / "game-data.json"
 KST = ZoneInfo("Asia/Seoul")
 
 
+def _load_previous_game_info() -> dict:
+    if not DATA_OUTPUT_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(DATA_OUTPUT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    game_info = payload.get("game_info")
+    return game_info if isinstance(game_info, dict) else {}
+
+
+def _merge_media_fallbacks(current_info: dict, previous_info: dict) -> dict:
+    if not current_info:
+        return current_info
+    merged = dict(current_info)
+    current_tv = (merged.get("eagles_tv") or {}) if isinstance(merged.get("eagles_tv"), dict) else {}
+    prev_tv = (previous_info.get("eagles_tv") or {}) if isinstance(previous_info.get("eagles_tv"), dict) else {}
+    if current_tv or prev_tv:
+        safe_tv = dict(current_tv)
+        for key in ("highlight", "oiyu"):
+            current_item = safe_tv.get(key) if isinstance(safe_tv.get(key), dict) else {}
+            prev_item = prev_tv.get(key) if isinstance(prev_tv.get(key), dict) else {}
+            if not (current_item or {}).get("url") and (prev_item or {}).get("url"):
+                safe_tv[key] = prev_item
+        merged["eagles_tv"] = safe_tv
+    return merged
+
+
 def build() -> None:
+    previous_game_info = _load_previous_game_info()
     game_info = get_next_hanwha_game() or {}
+    if game_info:
+        game_info = _merge_media_fallbacks(game_info, previous_game_info)
     has_game = bool(game_info)
     updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 

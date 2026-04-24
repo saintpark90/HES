@@ -5,6 +5,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 import xml.etree.ElementTree as ET
+import time
 
 import requests
 from bs4 import BeautifulSoup
@@ -30,6 +31,7 @@ YOUTUBE_PLAYLIST_FEED_URL = "https://www.youtube.com/feeds/videos.xml?playlist_i
 EAGLES_HIGHLIGHT_PLAYLIST_ID = "PLH13Vc2FtHHh-syagRtonzJLl-SkG3B7Q"
 EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
 NAVER_SPORTS_NEWS_API_URL = "https://api-gw.sports.naver.com/news/articles/kbaseball"
+YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list={playlist_id}"
 
 TEAM_NAME_TO_ID = {
     "KT": "KT",
@@ -240,7 +242,7 @@ def _fetch_latest_playlist_video(playlist_id: str) -> Dict[str, str]:
     feed_url = YOUTUBE_PLAYLIST_FEED_URL.format(playlist_id=playlist_id)
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        response = requests.get(feed_url, timeout=10, headers=headers)
+        response = _http_get_with_retries(feed_url, headers=headers, timeout=10)
         response.raise_for_status()
         root = ET.fromstring(response.text)
     except Exception:
@@ -284,11 +286,17 @@ def _fetch_latest_playlist_video_from_page(playlist_id: str) -> Dict[str, str]:
     page_url = f"https://www.youtube.com/playlist?list={playlist_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        response = requests.get(page_url, timeout=12, headers=headers)
+        response = _http_get_with_retries(page_url, headers=headers, timeout=12)
         response.raise_for_status()
         html = response.text
     except Exception:
-        return {}
+        return {
+            "title": "",
+            "url": YOUTUBE_PLAYLIST_URL.format(playlist_id=playlist_id),
+            "published_at": "",
+            "video_id": "",
+            "thumbnail": "",
+        }
 
     init_data_match = re.search(r"var ytInitialData = (\{.*?\});</script>", html, re.S)
     if not init_data_match:
@@ -373,7 +381,7 @@ def _fetch_youtube_video_title_ko(video_id: str, fallback_title: str = "") -> st
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
     try:
-        oembed_resp = requests.get(oembed_url, timeout=8, headers=headers)
+        oembed_resp = _http_get_with_retries(oembed_url, timeout=8, headers=headers)
         if oembed_resp.ok:
             oembed_payload = oembed_resp.json()
             oembed_title = str(oembed_payload.get("title", "") or "").strip()
@@ -383,7 +391,7 @@ def _fetch_youtube_video_title_ko(video_id: str, fallback_title: str = "") -> st
         pass
 
     try:
-        response = requests.get(url, timeout=10, headers=headers)
+        response = _http_get_with_retries(url, timeout=10, headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         og_title = soup.find("meta", attrs={"property": "og:title"})
@@ -394,6 +402,32 @@ def _fetch_youtube_video_title_ko(video_id: str, fallback_title: str = "") -> st
     except Exception:
         return fallback_title
     return fallback_title
+
+
+def _http_get_with_retries(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = 10,
+    retries: int = 3,
+) -> requests.Response:
+    last_error: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            return requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=timeout,
+            )
+        except Exception as exc:  # requests exceptions
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(0.5 * (attempt + 1))
+    if last_error:
+        raise last_error
+    raise RuntimeError("unreachable retry state")
 
 
 def _fetch_eagles_tv_latest() -> Dict[str, Any]:
