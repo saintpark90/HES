@@ -14,6 +14,7 @@ KBO_GAME_LIST_URL = "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList"
 KBO_TEAM_RECORD_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetTeamRecord"
 KBO_LINEUP_ANALYSIS_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetLineUpAnalysis"
 KBO_BOX_SCORE_SCROLL_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScoreScroll"
+KBO_PITCHER_RECORD_ANALYSIS_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetPitcherRecordAnalysis"
 KBO_PLAYER_SEARCH_URL = "https://www.koreabaseball.com/ws/Controls.asmx/GetSearchPlayer"
 HANWHA_TEAM_ID = "HH"
 SERIES_IDS = "0,1,3,4,5,6,7,9"
@@ -768,12 +769,74 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
         "era": basic.get("ERA", "-"),
         "wins": basic.get("W", "-"),
         "losses": basic.get("L", "-"),
-        "war": "-",  # KBO 투수 상세 페이지에서 WAR를 제공하지 않음
+        "war": "-",
         "games": basic.get("G", "-"),
         "avg_innings": basic.get("IP", "-"),
         "qs": advanced.get("QS", "-"),
         "whip": advanced.get("WHIP", "-"),
         "image_url": image_url,
+    }
+
+
+def _fetch_pitcher_record_analysis(
+    season_id: str,
+    sr_id: str,
+    away_team_id: str,
+    away_pit_id: str,
+    home_team_id: str,
+    home_pit_id: str,
+) -> Dict[str, Dict[str, str]]:
+    payload = {
+        "leId": "1",
+        "srId": sr_id or "0",
+        "seasonId": season_id or str(date.today().year),
+        "awayTeamId": away_team_id or "",
+        "awayPitId": away_pit_id or "",
+        "homeTeamId": home_team_id or "",
+        "homePitId": home_pit_id or "",
+        "groupSc": "SEASON",
+    }
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"}
+    empty = {"away": {}, "home": {}}
+    try:
+        response = requests.post(
+            KBO_PITCHER_RECORD_ANALYSIS_URL,
+            data=payload,
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = json.loads(response.content.decode("utf-8-sig"))
+    except Exception:
+        return empty
+
+    rows = data.get("rows", []) if isinstance(data, dict) else []
+    if not isinstance(rows, list) or len(rows) < 2:
+        return empty
+
+    def parse_row(row_obj: Dict[str, Any]) -> Dict[str, str]:
+        row_cells = row_obj.get("row", []) if isinstance(row_obj, dict) else []
+        if not isinstance(row_cells, list):
+            return {}
+        parsed = {"war": "-", "games": "-", "avg_innings": "-", "qs": "-", "whip": "-"}
+        for cell in row_cells:
+            cls = str((cell or {}).get("Class") or "")
+            text = _cell_text(cell) or "-"
+            if "td_war_" in cls:
+                parsed["war"] = text
+            elif "td_game_" in cls:
+                parsed["games"] = text
+            elif "td_startinn_" in cls.lower():
+                parsed["avg_innings"] = text
+            elif "td_qs_" in cls:
+                parsed["qs"] = text
+            elif "td_whip_" in cls:
+                parsed["whip"] = text
+        return parsed
+
+    return {
+        "away": parse_row(rows[0]),
+        "home": parse_row(rows[1]),
     }
 
 
@@ -1201,6 +1264,22 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             home_starter_stats = _fetch_pitcher_stats(home_starter_id)
             away_team_id = str(game.get("AWAY_ID", ""))
             home_team_id = str(game.get("HOME_ID", ""))
+            analysis_stats = _fetch_pitcher_record_analysis(
+                season_id=season_id,
+                sr_id=sr_id,
+                away_team_id=away_team_id,
+                away_pit_id=away_starter_id,
+                home_team_id=home_team_id,
+                home_pit_id=home_starter_id,
+            )
+            away_analysis = analysis_stats.get("away", {})
+            home_analysis = analysis_stats.get("home", {})
+            if not away_starter_stats:
+                away_starter_stats = {}
+            if not home_starter_stats:
+                home_starter_stats = {}
+            away_starter_stats["war"] = away_analysis.get("war") or away_starter_stats.get("war") or "-"
+            home_starter_stats["war"] = home_analysis.get("war") or home_starter_stats.get("war") or "-"
             team_comparison = _fetch_team_comparison(game_id, season_id, away_team_id, home_team_id)
             head_to_head_summary = _find_head_to_head_record(
                 rank_daily.get("head_to_head", []),
