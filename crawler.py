@@ -596,7 +596,7 @@ def _find_latest_finished_hanwha_game(before_date: date, max_days_lookback: int 
     return None
 
 
-def _fetch_hanwha_last_game_batters(game: Dict[str, Any], game_date: date) -> list[Dict[str, str]]:
+def _fetch_box_score_scroll(game: Dict[str, Any], game_date: date) -> Dict[str, Any]:
     payload = {
         "leId": "1",
         "srId": str(game.get("SR_ID") or "0"),
@@ -612,14 +612,19 @@ def _fetch_hanwha_last_game_batters(game: Dict[str, Any], game_date: date) -> li
             timeout=10,
         )
         response.raise_for_status()
-        data = json.loads(response.content.decode("utf-8-sig"))
+        return json.loads(response.content.decode("utf-8-sig"))
     except Exception:
+        return {}
+
+
+def _extract_hanwha_boxscore_batters(
+    box_data: Dict[str, Any],
+    game: Dict[str, Any],
+) -> list[Dict[str, str]]:
+    if str(box_data.get("code", "")) != "100":
         return []
 
-    if str(data.get("code", "")) != "100":
-        return []
-
-    arr_hitter = data.get("arrHitter", []) or []
+    arr_hitter = box_data.get("arrHitter", []) or []
     if len(arr_hitter) < 2:
         return []
 
@@ -673,6 +678,66 @@ def _fetch_hanwha_last_game_batters(game: Dict[str, Any], game_date: date) -> li
     return batters[:9]
 
 
+def _extract_hanwha_boxscore_pitchers(
+    box_data: Dict[str, Any],
+    game: Dict[str, Any],
+) -> list[Dict[str, str]]:
+    if str(box_data.get("code", "")) != "100":
+        return []
+
+    arr_pitcher = box_data.get("arrPitcher", []) or []
+    if len(arr_pitcher) < 2:
+        return []
+
+    hanwha_is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
+    target_idx = 0 if hanwha_is_away else 1
+    if target_idx >= len(arr_pitcher):
+        return []
+
+    try:
+        table = json.loads(str(arr_pitcher[target_idx].get("table", "{}") or "{}"))
+    except Exception:
+        return []
+
+    rows = table.get("rows", []) or []
+    if not rows:
+        return []
+
+    pitchers: list[Dict[str, str]] = []
+    for row in rows:
+        cells = (row or {}).get("row", [])
+        if len(cells) < 17:
+            continue
+
+        name = _cell_text(cells[0])
+        if not name or name == "-":
+            continue
+        pitchers.append(
+            {
+                "name": name,
+                "ip": _cell_text(cells[6]) or "-",
+                "hit": _cell_text(cells[10]) or "-",
+                "run": _cell_text(cells[14]) or "-",
+                "er": _cell_text(cells[15]) or "-",
+                "bb": _cell_text(cells[12]) or "-",
+                "so": _cell_text(cells[13]) or "-",
+                "era": _cell_text(cells[16]) or "-",
+            }
+        )
+    return pitchers
+
+
+def _fetch_hanwha_game_boxscore_stats(
+    game: Dict[str, Any],
+    game_date: date,
+) -> Dict[str, list[Dict[str, str]]]:
+    box_data = _fetch_box_score_scroll(game=game, game_date=game_date)
+    return {
+        "batters": _extract_hanwha_boxscore_batters(box_data=box_data, game=game),
+        "pitchers": _extract_hanwha_boxscore_pitchers(box_data=box_data, game=game),
+    }
+
+
 def _build_lineup_info(
     game: Dict[str, Any],
     target_date: date,
@@ -687,22 +752,41 @@ def _build_lineup_info(
     # KBO can return full lineup rows while LINEUP_CK remains false.
     # Prefer actual lineup rows when present to avoid stale fallback display.
     if len(today_lineup) >= 9:
+        realtime_stats = _fetch_hanwha_game_boxscore_stats(game=game, game_date=target_date)
+        realtime_batters = realtime_stats.get("batters", [])
+        realtime_pitchers = realtime_stats.get("pitchers", [])
+        by_order = {
+            str(item.get("order") or ""): item
+            for item in realtime_batters
+            if str(item.get("order") or "")
+        }
+        by_name = {
+            str(item.get("name") or ""): item
+            for item in realtime_batters
+            if str(item.get("name") or "")
+        }
+        merged_batters = []
+        for item in today_lineup[:9]:
+            order = str(item.get("order", "-"))
+            name = str(item.get("name", "-"))
+            stat_src = by_order.get(order) or by_name.get(name) or {}
+            merged_batters.append(
+                {
+                    "order": order,
+                    "position": item.get("position", "-"),
+                    "name": name,
+                    "ab": stat_src.get("ab", "-"),
+                    "hit": stat_src.get("hit", "-"),
+                    "run": stat_src.get("run", "-"),
+                    "avg": stat_src.get("avg", "-"),
+                }
+            )
         return {
             "is_official": True,
             "notice": "",
             "source_game_date": target_date.isoformat(),
-            "batters": [
-                {
-                    "order": item.get("order", "-"),
-                    "position": item.get("position", "-"),
-                    "name": item.get("name", "-"),
-                    "ab": "-",
-                    "hit": "-",
-                    "run": "-",
-                    "avg": "-",
-                }
-                for item in today_lineup[:9]
-            ],
+            "batters": merged_batters,
+            "pitchers": realtime_pitchers,
         }
 
     latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
@@ -712,15 +796,17 @@ def _build_lineup_info(
             "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
             "source_game_date": "",
             "batters": [],
+            "pitchers": [],
         }
 
     latest_game_date = latest_game.get("_resolved_date") or (target_date - timedelta(days=1))
-    fallback_batters = _fetch_hanwha_last_game_batters(game=latest_game, game_date=latest_game_date)
+    fallback_stats = _fetch_hanwha_game_boxscore_stats(game=latest_game, game_date=latest_game_date)
     return {
         "is_official": False,
         "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
         "source_game_date": latest_game_date.isoformat(),
-        "batters": fallback_batters,
+        "batters": fallback_stats.get("batters", []),
+        "pitchers": fallback_stats.get("pitchers", []),
     }
 
 

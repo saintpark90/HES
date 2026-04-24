@@ -304,6 +304,19 @@ const renderLineupSection = (g) => {
         <td>${b.avg || "-"}</td>
       </tr>
     `).join("");
+  const pitchers = Array.isArray(lineup.pitchers) ? lineup.pitchers : [];
+  const pitcherRows = pitchers.map((p) => `
+      <tr>
+        <td class="lineup-player">${p.name || "-"}</td>
+        <td>${p.ip || "-"}</td>
+        <td>${p.hit || "-"}</td>
+        <td>${p.run || "-"}</td>
+        <td>${p.er || "-"}</td>
+        <td>${p.bb || "-"}</td>
+        <td>${p.so || "-"}</td>
+        <td>${p.era || "-"}</td>
+      </tr>
+    `).join("");
 
   const sourceDate = lineup.source_game_date
     ? ` (기준 경기일: ${lineup.source_game_date})`
@@ -354,6 +367,26 @@ const renderLineupSection = (g) => {
           </thead>
           <tbody>
             ${rows || `<tr><td colspan="7" class="lineup-empty">라인업 정보를 불러오지 못했습니다.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="lineup-pitcher-title">투수 성적</div>
+      <div class="lineup-table-wrap">
+        <table class="lineup-table">
+          <thead>
+            <tr>
+              <th>선수명</th>
+              <th>이닝</th>
+              <th>피안타</th>
+              <th>실점</th>
+              <th>자책</th>
+              <th>4사구</th>
+              <th>삼진</th>
+              <th>평균자책</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pitcherRows || `<tr><td colspan="8" class="lineup-empty">투수 성적 정보를 불러오지 못했습니다.</td></tr>`}
           </tbody>
         </table>
       </div>

@@ -576,6 +576,14 @@ h1 {
   overflow-x: auto;
 }
 
+.lineup-pitcher-title {
+  margin-top: 14px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #555;
+}
+
 .lineup-table {
   width: 100%;
   border-collapse: collapse;
