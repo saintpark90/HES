@@ -738,6 +738,132 @@ def _fetch_hanwha_game_boxscore_stats(
     }
 
 
+def _looks_numeric_token(value: str) -> bool:
+    token = (value or "").strip()
+    return bool(re.match(r"^\d+(\.\d+)?$", token))
+
+
+def _extract_live_text_hanwha_stats(
+    game: Dict[str, Any],
+    season_id: str,
+    game_id: str,
+    sr_id: str,
+) -> Dict[str, list[Dict[str, str]]]:
+    payload = {
+        "leagueId": "1",
+        "seriesId": sr_id or "0",
+        "gameId": game_id,
+        "gyear": season_id or str(date.today().year),
+    }
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"}
+    try:
+        response = requests.post(KBO_LIVETEXT_VIEW2_URL, data=payload, headers=headers, timeout=10)
+        response.raise_for_status()
+    except Exception:
+        return {"batters": [], "pitchers": []}
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    team_name = str(game.get("AWAY_NM") if game.get("AWAY_ID") == HANWHA_TEAM_ID else game.get("HOME_NM") or "")
+    lineup_rows: list[list[str]] = []
+    batter_rows: list[list[str]] = []
+    pitcher_rows: list[list[str]] = []
+    pitcher_detail_rows: list[list[str]] = []
+
+    for table in soup.find_all("table"):
+        caption_tag = table.find("caption")
+        caption = _clean_html_text(caption_tag.get_text(" ", strip=True) if caption_tag else "")
+        if not caption or (team_name and team_name not in caption):
+            continue
+
+        rows: list[list[str]] = []
+        for tr in table.find_all("tr")[1:]:
+            cells = [_clean_html_text(td.get_text(" ", strip=True)) for td in tr.find_all("td")]
+            if any(cells):
+                rows.append(cells)
+        if not rows:
+            continue
+
+        first = rows[0]
+        if "투수" in caption and len(first) >= 5:
+            pitcher_rows = rows
+            continue
+        if len(first) >= 12 and not re.match(r"^\d+$", first[0] or ""):
+            ip_token = first[1]
+            if _looks_numeric_token(first[2]) and _looks_numeric_token(first[10]) and _looks_numeric_token(first[11]):
+                if _looks_numeric_token(ip_token) or "." in ip_token or " " in ip_token:
+                    pitcher_detail_rows = rows
+                    continue
+        if "타" in caption:
+            if len(first) >= 5 and re.match(r"^\d+$", first[0] or ""):
+                lineup_rows = rows
+            elif len(first) >= 4 and not re.match(r"^\d+$", first[0] or ""):
+                batter_rows = rows
+
+    batters: list[Dict[str, str]] = []
+    detail_by_name: Dict[str, list[str]] = {}
+    for row in batter_rows:
+        if len(row) >= 4 and _looks_numeric_token(row[1]) and _looks_numeric_token(row[2]) and _looks_numeric_token(row[3]):
+            detail_by_name[row[0]] = row
+
+    for row in lineup_rows:
+        if len(row) < 5:
+            continue
+        order = row[0]
+        if not re.match(r"^\d+$", order):
+            continue
+        name = row[1]
+        detail = detail_by_name.get(name, row)
+        batters.append(
+            {
+                "order": order,
+                "position": "-",
+                "name": name,
+                "ab": detail[1] if len(detail) > 1 else (row[2] if len(row) > 2 else "-"),
+                "hit": detail[2] if len(detail) > 2 else (row[3] if len(row) > 3 else "-"),
+                "run": detail[3] if len(detail) > 3 else (row[4] if len(row) > 4 else "-"),
+                "avg": "-",
+            }
+        )
+
+    pitchers: list[Dict[str, str]] = []
+    for row in pitcher_rows:
+        if len(row) < 5:
+            continue
+        pitchers.append(
+            {
+                "name": row[0],
+                "ip": row[1],
+                "hit": row[2],
+                "run": row[3],
+                "er": row[4],
+                "bb": "-",
+                "so": "-",
+                "era": "-",
+            }
+        )
+    if len(pitchers) <= 1 and pitcher_detail_rows:
+        pitchers = []
+        for row in pitcher_detail_rows:
+            if len(row) < 12:
+                continue
+            pitchers.append(
+                {
+                    "name": row[0],
+                    "ip": row[1],
+                    "hit": row[5],
+                    "run": row[10],
+                    "er": row[11],
+                    "bb": row[7],
+                    "so": row[9],
+                    "era": "-",
+                }
+            )
+
+    batters = [b for b in batters if b.get("name")]
+    pitchers = [p for p in pitchers if p.get("name")]
+    return {"batters": batters[:9], "pitchers": pitchers}
+
+
 def _build_lineup_info(
     game: Dict[str, Any],
     target_date: date,
@@ -748,11 +874,32 @@ def _build_lineup_info(
     is_hanwha_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
     lineup_data = _fetch_lineup_analysis(game_id=game_id, season_id=season_id, sr_id=sr_id)
     today_lineup = lineup_data.get("away_lineup", []) if is_hanwha_away else lineup_data.get("home_lineup", [])
+    is_today_target = target_date == date.today()
 
     # KBO can return full lineup rows while LINEUP_CK remains false.
     # Prefer actual lineup rows when present to avoid stale fallback display.
-    if len(today_lineup) >= 9:
+    if is_today_target and len(today_lineup) >= 9:
         realtime_stats = _fetch_hanwha_game_boxscore_stats(game=game, game_date=target_date)
+        if not realtime_stats.get("batters") or not realtime_stats.get("pitchers"):
+            live_stats = _extract_live_text_hanwha_stats(
+                game=game,
+                season_id=season_id,
+                game_id=game_id,
+                sr_id=sr_id,
+            )
+            if not realtime_stats.get("batters"):
+                realtime_stats["batters"] = live_stats.get("batters", [])
+            if not realtime_stats.get("pitchers"):
+                realtime_stats["pitchers"] = live_stats.get("pitchers", [])
+        if not realtime_stats.get("batters") or not realtime_stats.get("pitchers"):
+            latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
+            if latest_game:
+                latest_game_date = latest_game.get("_resolved_date") or (target_date - timedelta(days=1))
+                fallback_stats = _fetch_hanwha_game_boxscore_stats(game=latest_game, game_date=latest_game_date)
+                if not realtime_stats.get("batters"):
+                    realtime_stats["batters"] = fallback_stats.get("batters", [])
+                if not realtime_stats.get("pitchers"):
+                    realtime_stats["pitchers"] = fallback_stats.get("pitchers", [])
         realtime_batters = realtime_stats.get("batters", [])
         realtime_pitchers = realtime_stats.get("pitchers", [])
         by_order = {
@@ -801,6 +948,19 @@ def _build_lineup_info(
 
     latest_game_date = latest_game.get("_resolved_date") or (target_date - timedelta(days=1))
     fallback_stats = _fetch_hanwha_game_boxscore_stats(game=latest_game, game_date=latest_game_date)
+    probe_date = latest_game_date
+    while (
+        not fallback_stats.get("batters")
+        and not fallback_stats.get("pitchers")
+        and probe_date > (target_date - timedelta(days=14))
+    ):
+        older_game = _find_latest_finished_hanwha_game(before_date=probe_date)
+        if not older_game:
+            break
+        older_date = older_game.get("_resolved_date") or (probe_date - timedelta(days=1))
+        fallback_stats = _fetch_hanwha_game_boxscore_stats(game=older_game, game_date=older_date)
+        latest_game_date = older_date
+        probe_date = older_date
     return {
         "is_official": False,
         "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
