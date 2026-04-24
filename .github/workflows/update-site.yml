@@ -3,12 +3,12 @@ name: Update HES Pages Data
 on:
   workflow_dispatch:
   schedule:
-    # Regular refresh to keep preview data up to date.
-    - cron: "0 */6 * * *"
-    # Live sync window (KST): every minute from 18:30 through 01:59 next day.
-    # UTC mapping: 09:30-09:59 and 10:00-16:59.
+    # KST 10:00~18:29: every 5 minutes (UTC 01:00~09:29).
+    - cron: "*/5 1-8 * * *"
+    - cron: "0-25/5 9 * * *"
+    # KST 18:30~23:59: every minute (UTC 09:30~14:59).
     - cron: "30-59 9 * * *"
-    - cron: "* 10-16 * * *"
+    - cron: "* 10-14 * * *"
   push:
     branches:
       - main
@@ -38,42 +38,22 @@ jobs:
         run: |
           python - <<'PY'
           import os
-          from datetime import datetime, time
-          from zoneinfo import ZoneInfo
-          from crawler import get_next_hanwha_game, has_hanwha_game_on_date
 
           event_name = os.getenv("GITHUB_EVENT_NAME", "")
           event_schedule = os.getenv("EVENT_SCHEDULE", "")
-          now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-          game_info = get_next_hanwha_game() or {}
-          live = game_info.get("live_status", {}) if game_info else {}
-          game_date = game_info.get("game_date_ymd", "")
-          is_today_game = game_date == now_kst.strftime("%Y-%m-%d")
-          has_today_hanwha_game = has_hanwha_game_on_date(now_kst.date())
-          in_live_window = now_kst.time() >= time(18, 30) or now_kst.time() <= time(1, 59)
-          is_live = bool(live.get("is_live"))
-          is_final = bool(live.get("is_final"))
 
           should_run = True
           reason = "non-scheduled event"
 
           if event_name == "schedule":
-              if event_schedule == "0 */6 * * *":
-                  should_run = True
-                  reason = "regular 6h refresh"
-              else:
-                  # Minute-level schedules run only when game-day/live conditions match.
-                  should_run = (
-                      (has_today_hanwha_game and in_live_window)
-                      or is_live
-                      or is_final
-                  )
-                  reason = (
-                      f"minute window gate: has_today_hanwha_game={has_today_hanwha_game}, "
-                      f"next_game_today={is_today_game}, "
-                      f"in_live_window={in_live_window}, is_live={is_live}, "
-                      f"is_final={is_final}"
-                  )
+              allowed = {
+                  "*/5 1-8 * * *",
+                  "0-25/5 9 * * *",
+                  "30-59 9 * * *",
+                  "* 10-14 * * *",
+              }
+              should_run = event_schedule in allowed
+              reason = f"scheduled refresh window: {event_schedule}"
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"should_run={'true' if should_run else 'false'}\n")

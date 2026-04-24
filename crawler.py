@@ -4,12 +4,15 @@ import json
 import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
+import xml.etree.ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
 
 KBO_GAME_LIST_URL = "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList"
 KBO_TEAM_RECORD_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetTeamRecord"
+KBO_LINEUP_ANALYSIS_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetLineUpAnalysis"
+KBO_BOX_SCORE_SCROLL_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScoreScroll"
 KBO_PLAYER_SEARCH_URL = "https://www.koreabaseball.com/ws/Controls.asmx/GetSearchPlayer"
 HANWHA_TEAM_ID = "HH"
 SERIES_IDS = "0,1,3,4,5,6,7,9"
@@ -23,6 +26,10 @@ NAVER_KBO_TEAM_RANK_URL = NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/se
 NAVER_KBO_LAST10_URL = (
     NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/seasons/{season}/teams/last-ten-games"
 )
+YOUTUBE_PLAYLIST_FEED_URL = "https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
+EAGLES_HIGHLIGHT_PLAYLIST_ID = "PLH13Vc2FtHHh-syagRtonzJLl-SkG3B7Q"
+EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
+NAVER_SPORTS_NEWS_API_URL = "https://api-gw.sports.naver.com/news/articles/kbaseball"
 
 TEAM_NAME_TO_ID = {
     "KT": "KT",
@@ -146,6 +153,10 @@ def _clean_html_text(value: str) -> str:
     return text.replace("&nbsp;", " ").strip()
 
 
+def _cell_text(cell: Dict[str, Any]) -> str:
+    return _clean_html_text(str((cell or {}).get("Text", "") or ""))
+
+
 def _parse_stat_tables(html: str) -> list[dict[str, str]]:
     """Parse every <table> in html and return list of header→first-row-value dicts."""
     flat = html.replace("\n", " ")
@@ -222,6 +233,415 @@ def _fetch_team_comparison(game_id: str, season_id: str, away_id: str, home_id: 
         "home": _parse_team_record_row(home_row),
         "away_emblem": f"{KBO_EMBLEM_BASE}/{emblem_year}/emblem_{away_id}.png",
         "home_emblem": f"{KBO_EMBLEM_BASE}/{emblem_year}/emblem_{home_id}.png",
+    }
+
+
+def _fetch_latest_playlist_video(playlist_id: str) -> Dict[str, str]:
+    feed_url = YOUTUBE_PLAYLIST_FEED_URL.format(playlist_id=playlist_id)
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = requests.get(feed_url, timeout=10, headers=headers)
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+    except Exception:
+        return _fetch_latest_playlist_video_from_page(playlist_id)
+
+    ns = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "yt": "http://www.youtube.com/xml/schemas/2015",
+        "media": "http://search.yahoo.com/mrss/",
+    }
+    entry = root.find("atom:entry", ns)
+    if entry is None:
+        return _fetch_latest_playlist_video_from_page(playlist_id)
+
+    title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
+    link_node = entry.find("atom:link", ns)
+    video_url = ""
+    if link_node is not None:
+        video_url = str(link_node.attrib.get("href", "") or "").strip()
+    published = (entry.findtext("atom:published", default="", namespaces=ns) or "").strip()
+    video_id = (entry.findtext("yt:videoId", default="", namespaces=ns) or "").strip()
+    thumbnail = ""
+    thumbnail_node = entry.find("media:group/media:thumbnail", ns)
+    if thumbnail_node is not None:
+        thumbnail = str(thumbnail_node.attrib.get("url", "") or "").strip()
+    if not thumbnail and video_id:
+        thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+    return {
+        "title": title,
+        "url": video_url,
+        "published_at": published,
+        "video_id": video_id,
+        "thumbnail": thumbnail,
+    }
+
+
+def _fetch_latest_playlist_video_from_page(playlist_id: str) -> Dict[str, str]:
+    page_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = requests.get(page_url, timeout=12, headers=headers)
+        response.raise_for_status()
+        html = response.text
+    except Exception:
+        return {}
+
+    init_data_match = re.search(r"var ytInitialData = (\{.*?\});</script>", html, re.S)
+    if not init_data_match:
+        video_id_match = re.search(r"watch\?v=([A-Za-z0-9_-]{11})", html)
+        if not video_id_match:
+            return {}
+        video_id = video_id_match.group(1)
+        return {
+            "title": "",
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "published_at": "",
+            "video_id": video_id,
+            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        }
+
+    try:
+        init_data = json.loads(init_data_match.group(1))
+    except Exception:
+        return {}
+
+    renderer = _find_first_playlist_video_renderer(init_data)
+    if not renderer:
+        return {}
+    video_id = str(renderer.get("videoId", "") or "").strip()
+    if not video_id:
+        return {}
+
+    title = ""
+    title_data = renderer.get("title", {})
+    if isinstance(title_data, dict):
+        runs = title_data.get("runs", []) or []
+        if runs and isinstance(runs[0], dict):
+            title = str(runs[0].get("text", "") or "").strip()
+        if not title:
+            title = str(title_data.get("simpleText", "") or "").strip()
+
+    published = ""
+    published_text = renderer.get("publishedTimeText", {})
+    if isinstance(published_text, dict):
+        published = str(published_text.get("simpleText", "") or "").strip()
+    if not published:
+        published_data = renderer.get("videoInfo", {})
+        if isinstance(published_data, dict):
+            runs = published_data.get("runs", []) or []
+            if runs and isinstance(runs[0], dict):
+                published = str(runs[0].get("text", "") or "").strip()
+
+    return {
+        "title": title,
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+        "published_at": published,
+        "video_id": video_id,
+        "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+    }
+
+
+def _find_first_playlist_video_renderer(node: Any) -> Dict[str, Any]:
+    if isinstance(node, dict):
+        if "playlistVideoRenderer" in node and isinstance(node["playlistVideoRenderer"], dict):
+            return node["playlistVideoRenderer"]
+        for value in node.values():
+            found = _find_first_playlist_video_renderer(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_first_playlist_video_renderer(item)
+            if found:
+                return found
+    return {}
+
+
+def _fetch_eagles_tv_latest() -> Dict[str, Any]:
+    return {
+        "highlight": _fetch_latest_playlist_video(EAGLES_HIGHLIGHT_PLAYLIST_ID),
+        "oiyu": _fetch_latest_playlist_video(EAGLES_OIYU_PLAYLIST_ID),
+    }
+
+
+def _build_naver_article_url(oid: str, aid: str) -> str:
+    if not oid or not aid:
+        return ""
+    return f"https://m.sports.naver.com/kbaseball/article/{oid}/{aid}"
+
+
+def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
+    params = {
+        "team": HANWHA_TEAM_ID,
+        "page": 1,
+        "pageSize": max(1, min(limit, 20)),
+        "sort": "MYTEAM",
+        "isPhoto": "Y",
+        "date_flag": "Y",
+        "categoryId": "kbo",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://m.sports.naver.com/",
+    }
+    try:
+        response = requests.get(
+            NAVER_SPORTS_NEWS_API_URL,
+            params=params,
+            timeout=10,
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return []
+
+    news_list = ((payload.get("result") or {}).get("newsList") or [])[:limit]
+    result: list[Dict[str, str]] = []
+    for item in news_list:
+        oid = str(item.get("oid", "") or "")
+        aid = str(item.get("aid", "") or "")
+        article_url = _build_naver_article_url(oid, aid)
+        if not article_url:
+            continue
+        result.append(
+            {
+                "title": str(item.get("title", "") or "").strip(),
+                "url": article_url,
+                "thumbnail": str(item.get("thumbnail", "") or item.get("image", "") or "").strip(),
+                "source_name": str(item.get("sourceName", "") or "").strip(),
+                "published_at": str(item.get("dateTime", "") or "").strip(),
+            }
+        )
+    return result
+
+
+def _parse_lineup_grid_rows(raw_grid_json: str) -> list[Dict[str, str]]:
+    if not raw_grid_json:
+        return []
+    try:
+        grid = json.loads(raw_grid_json)
+    except Exception:
+        return []
+
+    lineup_rows: list[Dict[str, str]] = []
+    seen_orders: set[str] = set()
+    for row_obj in grid.get("rows", []):
+        cells = row_obj.get("row", []) if isinstance(row_obj, dict) else []
+        if len(cells) < 3:
+            continue
+        order = _cell_text(cells[0])
+        position = _cell_text(cells[1])
+        player_name = _cell_text(cells[2])
+        if not order or not player_name:
+            continue
+        if not re.match(r"^\d+$", order):
+            continue
+        if order in seen_orders:
+            continue
+        seen_orders.add(order)
+        lineup_rows.append(
+            {
+                "order": order,
+                "position": position,
+                "name": player_name,
+            }
+        )
+        if len(lineup_rows) >= 9:
+            break
+    lineup_rows.sort(key=lambda item: int(item["order"]))
+    return lineup_rows
+
+
+def _fetch_lineup_analysis(game_id: str, season_id: str, sr_id: str) -> Dict[str, Any]:
+    if not game_id:
+        return {"lineup_ck": False, "away_lineup": [], "home_lineup": []}
+    payload = {
+        "leId": "1",
+        "srId": sr_id or "0",
+        "seasonId": season_id or str(date.today().year),
+        "gameId": game_id,
+    }
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"}
+    try:
+        response = requests.post(
+            KBO_LINEUP_ANALYSIS_URL,
+            data=payload,
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = json.loads(response.content.decode("utf-8-sig"))
+    except Exception:
+        return {"lineup_ck": False, "away_lineup": [], "home_lineup": []}
+
+    lineup_ck = False
+    away_lineup_raw = ""
+    home_lineup_raw = ""
+    if isinstance(data, list):
+        if len(data) > 0 and isinstance(data[0], list) and data[0]:
+            lineup_ck = bool((data[0][0] or {}).get("LINEUP_CK"))
+        if len(data) > 4 and isinstance(data[4], list) and data[4]:
+            away_lineup_raw = str(data[4][0] or "")
+        if len(data) > 3 and isinstance(data[3], list) and data[3]:
+            home_lineup_raw = str(data[3][0] or "")
+    return {
+        "lineup_ck": lineup_ck,
+        "away_lineup": _parse_lineup_grid_rows(away_lineup_raw),
+        "home_lineup": _parse_lineup_grid_rows(home_lineup_raw),
+    }
+
+
+def _find_latest_finished_hanwha_game(before_date: date, max_days_lookback: int = 14) -> Optional[Dict[str, Any]]:
+    for offset in range(1, max_days_lookback + 1):
+        target = before_date - timedelta(days=offset)
+        try:
+            games = _fetch_games(target)
+        except Exception:
+            continue
+
+        candidates = [g for g in games if _is_hanwha_game(g) and (_is_finished_game(g) or _is_final_game(g))]
+        if not candidates:
+            continue
+
+        candidates.sort(
+            key=lambda g: (
+                str(g.get("G_TM", "") or ""),
+                str(g.get("G_ID", "") or ""),
+            ),
+            reverse=True,
+        )
+        picked = candidates[0]
+        picked["_resolved_date"] = target
+        return picked
+    return None
+
+
+def _fetch_hanwha_last_game_batters(game: Dict[str, Any], game_date: date) -> list[Dict[str, str]]:
+    payload = {
+        "leId": "1",
+        "srId": str(game.get("SR_ID") or "0"),
+        "seasonId": str(game.get("SEASON_ID") or game_date.year),
+        "gameId": str(game.get("G_ID") or ""),
+    }
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"}
+    try:
+        response = requests.post(
+            KBO_BOX_SCORE_SCROLL_URL,
+            data=payload,
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = json.loads(response.content.decode("utf-8-sig"))
+    except Exception:
+        return []
+
+    if str(data.get("code", "")) != "100":
+        return []
+
+    arr_hitter = data.get("arrHitter", []) or []
+    if len(arr_hitter) < 2:
+        return []
+
+    hanwha_is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
+    target_idx = 0 if hanwha_is_away else 1
+    if target_idx >= len(arr_hitter):
+        return []
+
+    try:
+        table_names = json.loads(str(arr_hitter[target_idx].get("table1", "{}") or "{}"))
+        table_stats = json.loads(str(arr_hitter[target_idx].get("table3", "{}") or "{}"))
+    except Exception:
+        return []
+
+    name_rows = table_names.get("rows", []) or []
+    stat_rows = table_stats.get("rows", []) or []
+    row_count = min(len(name_rows), len(stat_rows))
+    if row_count == 0:
+        return []
+
+    lineup_map: Dict[str, Dict[str, str]] = {}
+    for idx in range(row_count):
+        name_cells = (name_rows[idx] or {}).get("row", [])
+        stat_cells = (stat_rows[idx] or {}).get("row", [])
+        if len(name_cells) < 3 or len(stat_cells) < 5:
+            continue
+
+        order = _cell_text(name_cells[0])
+        player_name = _cell_text(name_cells[2])
+        if not order or not player_name or not re.match(r"^\d+$", order):
+            continue
+        if order in lineup_map:
+            continue
+
+        position = _cell_text(name_cells[1])
+        at_bats = _cell_text(stat_cells[0]) or "-"
+        hits = _cell_text(stat_cells[1]) or "-"
+        runs = _cell_text(stat_cells[3]) or "-"
+        avg = _cell_text(stat_cells[4]) or "-"
+        lineup_map[order] = {
+            "order": order,
+            "position": position,
+            "name": player_name,
+            "ab": at_bats,
+            "hit": hits,
+            "run": runs,
+            "avg": avg,
+        }
+
+    batters = [lineup_map[key] for key in sorted(lineup_map.keys(), key=int)]
+    return batters[:9]
+
+
+def _build_lineup_info(
+    game: Dict[str, Any],
+    target_date: date,
+    season_id: str,
+    game_id: str,
+    sr_id: str,
+) -> Dict[str, Any]:
+    is_hanwha_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
+    lineup_data = _fetch_lineup_analysis(game_id=game_id, season_id=season_id, sr_id=sr_id)
+    today_lineup = lineup_data.get("away_lineup", []) if is_hanwha_away else lineup_data.get("home_lineup", [])
+
+    if lineup_data.get("lineup_ck") and today_lineup:
+        return {
+            "is_official": True,
+            "notice": "",
+            "source_game_date": target_date.isoformat(),
+            "batters": [
+                {
+                    "order": item.get("order", "-"),
+                    "position": item.get("position", "-"),
+                    "name": item.get("name", "-"),
+                    "ab": "-",
+                    "hit": "-",
+                    "run": "-",
+                    "avg": "-",
+                }
+                for item in today_lineup[:9]
+            ],
+        }
+
+    latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
+    if not latest_game:
+        return {
+            "is_official": False,
+            "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
+            "source_game_date": "",
+            "batters": [],
+        }
+
+    latest_game_date = latest_game.get("_resolved_date") or (target_date - timedelta(days=1))
+    fallback_batters = _fetch_hanwha_last_game_batters(game=latest_game, game_date=latest_game_date)
+    return {
+        "is_official": False,
+        "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
+        "source_game_date": latest_game_date.isoformat(),
+        "batters": fallback_batters,
     }
 
 
@@ -495,8 +915,151 @@ def has_hanwha_game_on_date(target_date: date) -> bool:
     return any(_is_hanwha_game(game) for game in games)
 
 
+def _format_series_date_range(start_date: date, end_date: date) -> str:
+    if start_date == end_date:
+        return f"{start_date.month}/{start_date.day}"
+    if start_date.month == end_date.month:
+        return f"{start_date.month}/{start_date.day}~{end_date.day}"
+    return f"{start_date.month}/{start_date.day}~{end_date.month}/{end_date.day}"
+
+
+def _collect_hanwha_games(start_date: date, end_date: date) -> list[Dict[str, Any]]:
+    games: list[Dict[str, Any]] = []
+    cursor = start_date
+    while cursor <= end_date:
+        try:
+            day_games = _fetch_games(cursor)
+        except Exception:
+            cursor += timedelta(days=1)
+            continue
+
+        for game in day_games:
+            if not _is_hanwha_game(game):
+                continue
+            is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
+            opponent_name = game.get("HOME_NM") if is_away else game.get("AWAY_NM")
+            opponent_team_id = game.get("HOME_ID") if is_away else game.get("AWAY_ID")
+            season_id = str(game.get("SEASON_ID") or date.today().year)
+            games.append(
+                {
+                    "date": cursor,
+                    "opponent": str(opponent_name or "").strip(),
+                    "opponent_team_id": str(opponent_team_id or "").strip(),
+                    "stadium": str(game.get("S_NM") or "").strip(),
+                    "hanwha_home_away": "원정" if is_away else "홈",
+                    "season_id": season_id,
+                }
+            )
+        cursor += timedelta(days=1)
+
+    games.sort(key=lambda item: item["date"])
+    return games
+
+
+def _build_hanwha_series(games: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    if not games:
+        return []
+
+    series_list: list[Dict[str, Any]] = []
+    current = {
+        "opponent": games[0]["opponent"],
+        "opponent_team_id": games[0]["opponent_team_id"],
+        "start_date": games[0]["date"],
+        "end_date": games[0]["date"],
+        "game_count": 1,
+        "stadium": games[0]["stadium"],
+        "hanwha_home_away": games[0]["hanwha_home_away"],
+        "season_id": games[0]["season_id"],
+    }
+
+    for game in games[1:]:
+        day_gap = (game["date"] - current["end_date"]).days
+        same_opponent = game["opponent"] == current["opponent"]
+        if same_opponent and day_gap in {0, 1}:
+            current["end_date"] = game["date"]
+            current["game_count"] += 1
+            continue
+
+        series_list.append(current)
+        current = {
+            "opponent": game["opponent"],
+            "opponent_team_id": game["opponent_team_id"],
+            "start_date": game["date"],
+            "end_date": game["date"],
+            "game_count": 1,
+            "stadium": game["stadium"],
+            "hanwha_home_away": game["hanwha_home_away"],
+            "season_id": game["season_id"],
+        }
+
+    series_list.append(current)
+    return series_list
+
+
+def _serialize_series(series: Dict[str, Any]) -> Dict[str, Any]:
+    start_date = series["start_date"]
+    end_date = series["end_date"]
+    season_id = str(series.get("season_id") or date.today().year)
+    opponent_team_id = str(series.get("opponent_team_id") or "")
+    return {
+        "opponent": series["opponent"],
+        "opponent_team_id": opponent_team_id,
+        "date_range": _format_series_date_range(start_date, end_date),
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "game_count": series["game_count"],
+        "stadium": series.get("stadium", ""),
+        "hanwha_home_away": series.get("hanwha_home_away", ""),
+        "hanwha_emblem": f"{KBO_EMBLEM_BASE}/{season_id}/emblem_{HANWHA_TEAM_ID}.png",
+        "opponent_emblem": (
+            f"{KBO_EMBLEM_BASE}/{season_id}/emblem_{opponent_team_id}.png"
+            if opponent_team_id
+            else ""
+        ),
+    }
+
+
+def _resolve_hanwha_series(target_date: date, target_opponent: str, max_days_ahead: int) -> Dict[str, Any]:
+    # Include a short look-back window so an ongoing series can be detected reliably.
+    schedule_start = target_date - timedelta(days=7)
+    schedule_end = target_date + timedelta(days=max_days_ahead + 10)
+    games = _collect_hanwha_games(schedule_start, schedule_end)
+    series_list = _build_hanwha_series(games)
+    if not series_list:
+        return {"current_series": None, "next_series": None}
+
+    current_idx = -1
+    for idx, series in enumerate(series_list):
+        in_range = series["start_date"] <= target_date <= series["end_date"]
+        if not in_range:
+            continue
+        if target_opponent and series["opponent"] and series["opponent"] != target_opponent:
+            continue
+        current_idx = idx
+        break
+
+    if current_idx < 0:
+        for idx, series in enumerate(series_list):
+            if series["start_date"] >= target_date:
+                current_idx = idx
+                break
+
+    if current_idx < 0:
+        return {"current_series": None, "next_series": None}
+
+    current_series = _serialize_series(series_list[current_idx])
+    next_series = (
+        _serialize_series(series_list[current_idx + 1])
+        if current_idx + 1 < len(series_list)
+        else None
+    )
+    return {"current_series": current_series, "next_series": next_series}
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
+    eagles_tv = _fetch_eagles_tv_latest()
+    latest_news = _fetch_latest_hanwha_news(limit=5)
     today = date.today()
     for offset in range(max_days_ahead + 1):
         target = today + timedelta(days=offset)
@@ -555,6 +1118,18 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 game.get("HOME_NM", ""),
             )
             live_status = _build_live_status(game, game.get("AWAY_NM", ""), game.get("HOME_NM", ""))
+            series_info = _resolve_hanwha_series(
+                target_date=target,
+                target_opponent=opponent_name or "",
+                max_days_ahead=max_days_ahead,
+            )
+            lineup_info = _build_lineup_info(
+                game=game,
+                target_date=target,
+                season_id=season_id,
+                game_id=game_id,
+                sr_id=sr_id,
+            )
 
             return {
                 "season_id": season_id,
@@ -588,5 +1163,10 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "team_rankings": rank_daily.get("rankings", []),
                 "team_rank_date": rank_daily.get("rank_date", ""),
                 "live_status": live_status,
+                "current_series": series_info.get("current_series"),
+                "next_series": series_info.get("next_series"),
+                "lineup_info": lineup_info,
+                "eagles_tv": eagles_tv,
+                "latest_news": latest_news,
             }
     return None

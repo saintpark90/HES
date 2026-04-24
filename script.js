@@ -112,8 +112,10 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead) => {
 
 const renderTeamRankings = (rankings, rankDate) => {
   if (!Array.isArray(rankings) || rankings.length === 0) return "";
-    const rows = rankings.map((row) => `
-      <tr>
+    const rows = rankings.map((row) => {
+      const isHanwha = row?.team_id === "HH" || (row?.team_name || "").includes("한화");
+      return `
+      <tr class="${isHanwha ? "hanwha-row" : ""}">
         <td>${row.rank || "-"}</td>
         <td class="rank-team">
           ${row.emblem ? `<img src="${row.emblem}" alt="${row.team_name}" class="rank-emblem" />` : ""}
@@ -128,7 +130,8 @@ const renderTeamRankings = (rankings, rankDate) => {
         <td>${row.last10 || "-"}</td>
         <td>${row.streak || "-"}</td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
 
     return `
       <section class="rank-section">
@@ -156,11 +159,261 @@ const renderTeamRankings = (rankings, rankDate) => {
     `;
   };
 
+const renderSeriesSection = (g) => {
+  const currentSeries = g?.current_series;
+  const nextSeries = g?.next_series;
+  if (!currentSeries && !nextSeries) return "";
+
+  const findRankByTeamName = (teamName) => {
+    const rankings = Array.isArray(g?.team_rankings) ? g.team_rankings : [];
+    const found = rankings.find((row) => (row?.team_name || "") === teamName);
+    return found?.rank ? `${found.rank}위` : "-";
+  };
+
+  const renderTeamNameWithRank = (teamName) => {
+    const name = teamName || "-";
+    const rankText = findRankByTeamName(name);
+    return `${name}(${rankText})`;
+  };
+
+  const renderSeriesCard = (title, series) => {
+    if (!series) {
+      return `
+        <article class="series-card">
+          <h3>${title}</h3>
+          <div class="series-empty">-</div>
+        </article>
+      `;
+    }
+
+    const renderTeam = (name, emblem, fallbackAlt) => `
+      <div class="series-team">
+        ${emblem ? `<img src="${emblem}" alt="${fallbackAlt}" class="series-emblem" />` : ""}
+        <span>${renderTeamNameWithRank(name)}</span>
+      </div>
+    `;
+
+    return `
+      <article class="series-card">
+        <h3>${title}</h3>
+        <div class="series-matchup">
+          ${renderTeam("한화", series.hanwha_emblem, "한화")}
+          <span class="series-vs">vs</span>
+          ${renderTeam(series.opponent || "-", series.opponent_emblem, series.opponent || "상대팀")}
+        </div>
+        <div class="series-meta">일정: ${formatSeriesDateRangeWithWeekday(series)}</div>
+        <div class="series-meta">장소: ${series.stadium || "-"} (${series.hanwha_home_away || "-"})</div>
+      </article>
+    `;
+  };
+
+  return `
+    <section class="series-section">
+      <h2 class="cmp-title">한화 시리즈 일정</h2>
+      <div class="series-grid">
+        ${renderSeriesCard("현재 시리즈", currentSeries)}
+        ${renderSeriesCard("다음 시리즈", nextSeries)}
+      </div>
+    </section>
+  `;
+};
+
+const renderEaglesTvSection = (g) => {
+  const tv = g?.eagles_tv || {};
+  const items = [
+    { key: "highlight", label: "하이라이트", data: tv.highlight || {} },
+    { key: "oiyu", label: "오이유", data: tv.oiyu || {} },
+  ];
+
+  const cards = items.map((item) => {
+    const video = item.data || {};
+    if (!video.url) {
+      return `
+        <article class="eagles-tv-card">
+          <h3>${item.label}</h3>
+          <div class="eagles-tv-empty">최신 영상을 불러오지 못했습니다.</div>
+        </article>
+      `;
+    }
+
+    const published = formatUpdatedAt(video.published_at || "");
+    return `
+      <article class="eagles-tv-card">
+        <h3>${item.label}</h3>
+        <a href="${video.url}" target="_blank" rel="noopener noreferrer" class="eagles-tv-link">
+          ${video.thumbnail ? `<img src="${video.thumbnail}" alt="${item.label} 썸네일" class="eagles-tv-thumb" loading="lazy" />` : ""}
+          <div class="eagles-tv-meta">
+            <div class="eagles-tv-title">${video.title || "-"}</div>
+            <div class="eagles-tv-date">${published}</div>
+          </div>
+        </a>
+      </article>
+    `;
+  }).join("");
+
+  return `
+    <section class="eagles-tv-section">
+      <h2 class="cmp-title">최신 Eagles TV</h2>
+      <div class="eagles-tv-grid">
+        ${cards}
+      </div>
+    </section>
+  `;
+};
+
+const renderLatestNewsSection = (g) => {
+  const newsList = Array.isArray(g?.latest_news) ? g.latest_news : [];
+  const cards = newsList.slice(0, 5).map((news) => `
+      <article class="news-card">
+        <a href="${news.url || "#"}" target="_blank" rel="noopener noreferrer" class="news-link">
+          ${news.thumbnail ? `<img src="${news.thumbnail}" alt="뉴스 썸네일" class="news-thumb" loading="lazy" />` : ""}
+          <div class="news-meta">
+            <div class="news-title">${news.title || "-"}</div>
+            <div class="news-sub">
+              <span>${news.source_name || "-"}</span>
+              <span>${formatUpdatedAt(news.published_at || "")}</span>
+            </div>
+          </div>
+        </a>
+      </article>
+    `).join("");
+
+  return `
+    <section class="news-section">
+      <h2 class="cmp-title">최신 뉴스</h2>
+      <div class="news-grid">
+        ${cards || `<div class="news-empty">최신 뉴스를 불러오지 못했습니다.</div>`}
+      </div>
+    </section>
+  `;
+};
+
+const renderLineupSection = (g) => {
+  const lineup = g?.lineup_info;
+  if (!lineup) return "";
+  const tc = g?.team_comparison;
+  const awayTeamName = g?.away_team || "-";
+  const homeTeamName = g?.home_team || "-";
+  const awayEmblem = tc?.away_emblem || "";
+  const homeEmblem = tc?.home_emblem || "";
+
+  const batters = Array.isArray(lineup.batters) ? lineup.batters : [];
+  const rows = batters.map((b) => `
+      <tr>
+        <td>${b.order || "-"}</td>
+        <td>${b.position || "-"}</td>
+        <td class="lineup-player">${b.name || "-"}</td>
+        <td>${b.ab || "-"}</td>
+        <td>${b.hit || "-"}</td>
+        <td>${b.run || "-"}</td>
+        <td>${b.avg || "-"}</td>
+      </tr>
+    `).join("");
+
+  const sourceDate = lineup.source_game_date
+    ? ` (기준 경기일: ${lineup.source_game_date})`
+    : "";
+  const lineupDateSummary = (() => {
+    const dateText = g?.game_date || "-";
+    if (/\([일월화수목금토]\)/.test(dateText)) return dateText;
+    const match = String(g?.game_date_ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return dateText;
+    const dt = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    if (Number.isNaN(dt.getTime())) return dateText;
+    return `${dateText} (${KOR_WEEKDAYS[dt.getDay()]})`;
+  })();
+  const notice = lineup.is_official
+    ? ""
+    : `<div class="lineup-notice">${lineup.notice || "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다."}${sourceDate}</div>`;
+
+  return `
+    <section class="lineup-section">
+      <h2 class="cmp-title">라인업 정보</h2>
+      <div class="lineup-summary">
+        <div class="lineup-summary-matchup">
+          <span class="lineup-summary-team">
+            ${awayEmblem ? `<img src="${awayEmblem}" alt="${awayTeamName}" class="lineup-summary-emblem" />` : ""}
+            <strong>${awayTeamName}</strong>
+          </span>
+          <span class="lineup-summary-vs">vs</span>
+          <span class="lineup-summary-team">
+            ${homeEmblem ? `<img src="${homeEmblem}" alt="${homeTeamName}" class="lineup-summary-emblem" />` : ""}
+            <strong>${homeTeamName}</strong>
+          </span>
+        </div>
+        <div class="lineup-summary-date">${lineupDateSummary}</div>
+      </div>
+      ${notice}
+      <div class="lineup-table-wrap">
+        <table class="lineup-table">
+          <thead>
+            <tr>
+              <th>타순</th>
+              <th>포지션</th>
+              <th>선수명</th>
+              <th>타수</th>
+              <th>안타</th>
+              <th>득점</th>
+              <th>타율</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="7" class="lineup-empty">라인업 정보를 불러오지 못했습니다.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+};
+
 const formatUpdatedAt = (value) => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("ko-KR", { hour12: false });
+};
+
+const KOR_WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+const parseYmdAsLocalDate = (ymd) => {
+  if (!ymd || typeof ymd !== "string") return null;
+  const match = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const dt = new Date(year, month - 1, day);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const formatMonthDayWithWeekday = (date) =>
+  `${date.getMonth() + 1}/${date.getDate()}(${KOR_WEEKDAYS[date.getDay()]})`;
+
+const formatSeriesDateRangeWithWeekday = (series) => {
+  const start = parseYmdAsLocalDate(series?.start_date || "");
+  const end = parseYmdAsLocalDate(series?.end_date || "");
+  if (!start || !end) return series?.date_range || "-";
+
+  if (start.getTime() === end.getTime()) {
+    return formatMonthDayWithWeekday(start);
+  }
+
+  const sameMonth =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth();
+  const endText = sameMonth
+    ? `${end.getDate()}(${KOR_WEEKDAYS[end.getDay()]})`
+    : formatMonthDayWithWeekday(end);
+
+  return `${formatMonthDayWithWeekday(start)}~${endText}`;
+};
+
+const formatGameDateWithWeekday = (gameDateText, gameDateYmd) => {
+  if (!gameDateText) return "-";
+  if (/\([일월화수목금토]\)/.test(gameDateText)) return gameDateText;
+  const dt = parseYmdAsLocalDate(gameDateYmd || "");
+  if (!dt) return gameDateText;
+  return `${gameDateText} (${KOR_WEEKDAYS[dt.getDay()]})`;
 };
 
 const renderGame = (g, refreshedAt) => {
@@ -172,7 +425,7 @@ const renderGame = (g, refreshedAt) => {
   container.innerHTML = `
     <div class="updated-at">마지막 갱신: ${formatUpdatedAt(refreshedAt)}</div>
     ${renderLiveHeader(g)}
-    <div class="row"><span class="label">경기일:</span>${g.game_date}</div>
+    <div class="row"><span class="label">경기일:</span>${formatGameDateWithWeekday(g.game_date, g.game_date_ymd)}</div>
     <div class="row"><span class="label">경기시간:</span>${g.game_time}</div>
     <div class="row"><span class="label">대진:</span>${g.matchup}</div>
     <div class="row"><span class="label">구장:</span>${g.stadium}</div>
@@ -186,6 +439,10 @@ const renderGame = (g, refreshedAt) => {
       </div>
     </div>
     ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary)}
+    ${renderLineupSection(g)}
+    ${renderSeriesSection(g)}
+    ${renderEaglesTvSection(g)}
+    ${renderLatestNewsSection(g)}
     ${renderTeamRankings(g.team_rankings, g.team_rank_date)}
   `;
 };
