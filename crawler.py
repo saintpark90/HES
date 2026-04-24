@@ -678,7 +678,9 @@ def _build_lineup_info(
     lineup_data = _fetch_lineup_analysis(game_id=game_id, season_id=season_id, sr_id=sr_id)
     today_lineup = lineup_data.get("away_lineup", []) if is_hanwha_away else lineup_data.get("home_lineup", [])
 
-    if lineup_data.get("lineup_ck") and today_lineup:
+    # KBO can return full lineup rows while LINEUP_CK remains false.
+    # Prefer actual lineup rows when present to avoid stale fallback display.
+    if len(today_lineup) >= 9:
         return {
             "is_official": True,
             "notice": "",
