@@ -170,12 +170,6 @@ const renderSeriesSection = (g) => {
     return found?.rank ? `${found.rank}위` : "-";
   };
 
-  const renderTeamNameWithRank = (teamName) => {
-    const name = teamName || "-";
-    const rankText = findRankByTeamName(name);
-    return `${name}(${rankText})`;
-  };
-
   const renderSeriesCard = (title, series) => {
     if (!series) {
       return `
@@ -189,7 +183,10 @@ const renderSeriesSection = (g) => {
     const renderTeam = (name, emblem, fallbackAlt) => `
       <div class="series-team">
         ${emblem ? `<img src="${emblem}" alt="${fallbackAlt}" class="series-emblem" />` : ""}
-        <span>${renderTeamNameWithRank(name)}</span>
+        <div class="series-team-text">
+          <span class="series-team-name">${name || "-"}</span>
+          <span class="series-team-rank">(${findRankByTeamName(name || "-")})</span>
+        </div>
       </div>
     `;
 
@@ -269,10 +266,8 @@ const renderLatestNewsSection = (g) => {
           ${news.thumbnail ? `<img src="${news.thumbnail}" alt="뉴스 썸네일" class="news-thumb" loading="lazy" />` : ""}
           <div class="news-meta">
             <div class="news-title">${news.title || "-"}</div>
-            <div class="news-sub">
-              <span>${news.source_name || "-"}</span>
-              <span>${formatUpdatedAt(news.published_at || "")}</span>
-            </div>
+            <div class="news-sub">${news.source_name || "-"}</div>
+            <div class="news-time">${formatUpdatedAt(news.published_at || "")}</div>
           </div>
         </a>
       </article>

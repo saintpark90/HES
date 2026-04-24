@@ -268,6 +268,8 @@ def _fetch_latest_playlist_video(playlist_id: str) -> Dict[str, str]:
         thumbnail = str(thumbnail_node.attrib.get("url", "") or "").strip()
     if not thumbnail and video_id:
         thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+    if video_id:
+        title = _fetch_youtube_video_title_ko(video_id, title)
 
     return {
         "title": title,
@@ -333,6 +335,7 @@ def _fetch_latest_playlist_video_from_page(playlist_id: str) -> Dict[str, str]:
             runs = published_data.get("runs", []) or []
             if runs and isinstance(runs[0], dict):
                 published = str(runs[0].get("text", "") or "").strip()
+    title = _fetch_youtube_video_title_ko(video_id, title)
 
     return {
         "title": title,
@@ -357,6 +360,28 @@ def _find_first_playlist_video_renderer(node: Any) -> Dict[str, Any]:
             if found:
                 return found
     return {}
+
+
+def _fetch_youtube_video_title_ko(video_id: str, fallback_title: str = "") -> str:
+    if not video_id:
+        return fallback_title
+    url = f"https://www.youtube.com/watch?v={video_id}&hl=ko&gl=KR"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    try:
+        response = requests.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        og_title = soup.find("meta", attrs={"property": "og:title"})
+        if og_title and og_title.get("content"):
+            title = str(og_title.get("content")).strip()
+            if title:
+                return title
+    except Exception:
+        return fallback_title
+    return fallback_title
 
 
 def _fetch_eagles_tv_latest() -> Dict[str, Any]:
