@@ -46,7 +46,6 @@ jobs:
               kst = timezone(timedelta(hours=9))
               now_kst = datetime.now(timezone.utc).astimezone(kst)
               hour = now_kst.hour
-              minute = now_kst.minute
               in_window = 10 <= hour <= 23
               should_run = in_window
               reason = (
