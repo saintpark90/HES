@@ -42,11 +42,56 @@ def _merge_media_fallbacks(current_info: dict, previous_info: dict) -> dict:
     return merged
 
 
+def _is_missing_starter_name(name: str) -> bool:
+    token = (name or "").strip()
+    return token in {"", "-", "미정", "TBD", "예정"}
+
+
+def _merge_starter_fallbacks(current_info: dict, previous_info: dict) -> dict:
+    if not current_info:
+        return current_info
+    merged = dict(current_info)
+    if str(merged.get("game_id") or "") != str(previous_info.get("game_id") or ""):
+        return merged
+
+    if _is_missing_starter_name(str(merged.get("away_starter") or "")):
+        prev_name = str(previous_info.get("away_starter") or "").strip()
+        if not _is_missing_starter_name(prev_name):
+            merged["away_starter"] = prev_name
+    if _is_missing_starter_name(str(merged.get("home_starter") or "")):
+        prev_name = str(previous_info.get("home_starter") or "").strip()
+        if not _is_missing_starter_name(prev_name):
+            merged["home_starter"] = prev_name
+    if _is_missing_starter_name(str(merged.get("hanwha_starter") or "")):
+        prev_name = str(previous_info.get("hanwha_starter") or "").strip()
+        if not _is_missing_starter_name(prev_name):
+            merged["hanwha_starter"] = prev_name
+
+    for side in ("away", "home"):
+        id_key = f"{side}_starter_id"
+        img_key = f"{side}_starter_image"
+        stats_key = f"{side}_starter_stats"
+
+        if not str(merged.get(id_key) or "").strip() and str(previous_info.get(id_key) or "").strip():
+            merged[id_key] = previous_info.get(id_key)
+        if not str(merged.get(img_key) or "").strip() and str(previous_info.get(img_key) or "").strip():
+            merged[img_key] = previous_info.get(img_key)
+
+        current_stats = merged.get(stats_key)
+        prev_stats = previous_info.get(stats_key)
+        if isinstance(prev_stats, dict):
+            if not isinstance(current_stats, dict) or not any(str(v).strip() for v in current_stats.values()):
+                merged[stats_key] = prev_stats
+
+    return merged
+
+
 def build() -> None:
     previous_game_info = _load_previous_game_info()
     game_info = get_next_hanwha_game() or {}
     if game_info:
         game_info = _merge_media_fallbacks(game_info, previous_game_info)
+        game_info = _merge_starter_fallbacks(game_info, previous_game_info)
     has_game = bool(game_info)
     updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 
