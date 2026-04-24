@@ -1294,6 +1294,60 @@ def _find_head_to_head_record(
     return {"away_vs_home": away_vs_home, "home_vs_away": home_vs_away}
 
 
+def _parse_head_to_head_record(record: str) -> tuple[int, int, int]:
+    parts = [p.strip() for p in str(record or "").split("-")]
+    if len(parts) != 3:
+        return (0, 0, 0)
+    try:
+        return (int(parts[0]), int(parts[1]), int(parts[2]))
+    except Exception:
+        return (0, 0, 0)
+
+
+def _format_head_to_head_record(wins: int, losses: int, draws: int) -> str:
+    return f"{wins}-{losses}-{draws}"
+
+
+def _apply_final_game_to_head_to_head(
+    summary: Dict[str, str],
+    final_game: Dict[str, Any],
+    away_team: str,
+    home_team: str,
+) -> Dict[str, str]:
+    if not final_game:
+        return summary
+    if str(final_game.get("AWAY_NM", "") or "") != away_team:
+        return summary
+    if str(final_game.get("HOME_NM", "") or "") != home_team:
+        return summary
+    if not _is_final_game(final_game):
+        return summary
+
+    try:
+        away_score = int(str(final_game.get("T_SCORE_CN", "0") or "0"))
+        home_score = int(str(final_game.get("B_SCORE_CN", "0") or "0"))
+    except Exception:
+        return summary
+
+    away_w, away_l, away_d = _parse_head_to_head_record(summary.get("away_vs_home", "-"))
+    home_w, home_l, home_d = _parse_head_to_head_record(summary.get("home_vs_away", "-"))
+
+    if away_score > home_score:
+        away_w += 1
+        home_l += 1
+    elif away_score < home_score:
+        away_l += 1
+        home_w += 1
+    else:
+        away_d += 1
+        home_d += 1
+
+    return {
+        "away_vs_home": _format_head_to_head_record(away_w, away_l, away_d),
+        "home_vs_away": _format_head_to_head_record(home_w, home_l, home_d),
+    }
+
+
 def has_hanwha_game_on_date(target_date: date) -> bool:
     try:
         games = _fetch_games(target_date)
@@ -1448,6 +1502,22 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     eagles_tv = _fetch_eagles_tv_latest()
     latest_news = _fetch_latest_hanwha_news(limit=5)
     today = date.today()
+    today_final_hanwha_game: Optional[Dict[str, Any]] = None
+    try:
+        today_games = _fetch_games(today)
+        today_finals = [g for g in today_games if _is_hanwha_game(g) and _is_final_game(g)]
+        if today_finals:
+            today_finals.sort(
+                key=lambda g: (
+                    str(g.get("G_TM", "") or ""),
+                    str(g.get("G_ID", "") or ""),
+                ),
+                reverse=True,
+            )
+            today_final_hanwha_game = today_finals[0]
+    except Exception:
+        today_final_hanwha_game = None
+
     for offset in range(max_days_ahead + 1):
         target = today + timedelta(days=offset)
         games = _fetch_games(target)
@@ -1532,6 +1602,15 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 game.get("AWAY_NM", ""),
                 game.get("HOME_NM", ""),
             )
+            # Rank-daily matrix can lag right after final.
+            # For next-game view, reflect today's just-finished result immediately.
+            if offset > 0 and today_final_hanwha_game:
+                head_to_head_summary = _apply_final_game_to_head_to_head(
+                    summary=head_to_head_summary,
+                    final_game=today_final_hanwha_game,
+                    away_team=str(game.get("AWAY_NM", "") or ""),
+                    home_team=str(game.get("HOME_NM", "") or ""),
+                )
             live_status = _build_live_status(game, game.get("AWAY_NM", ""), game.get("HOME_NM", ""))
             series_info = _resolve_hanwha_series(
                 target_date=target,
