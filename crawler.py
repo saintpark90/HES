@@ -365,11 +365,23 @@ def _find_first_playlist_video_renderer(node: Any) -> Dict[str, Any]:
 def _fetch_youtube_video_title_ko(video_id: str, fallback_title: str = "") -> str:
     if not video_id:
         return fallback_title
-    url = f"https://www.youtube.com/watch?v={video_id}&hl=ko&gl=KR"
+    # 1) oEmbed is lightweight and tends to return channel-native title text.
+    oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json&hl=ko"
+    url = f"https://www.youtube.com/watch?v={video_id}&hl=ko&gl=KR&persist_hl=1&persist_gl=1"
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
+    try:
+        oembed_resp = requests.get(oembed_url, timeout=8, headers=headers)
+        if oembed_resp.ok:
+            oembed_payload = oembed_resp.json()
+            oembed_title = str(oembed_payload.get("title", "") or "").strip()
+            if oembed_title:
+                return oembed_title
+    except Exception:
+        pass
+
     try:
         response = requests.get(url, timeout=10, headers=headers)
         response.raise_for_status()
