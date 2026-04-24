@@ -36,22 +36,21 @@ jobs:
         run: |
           python - <<'PY'
           import os
-          from datetime import datetime, timedelta, timezone
+          from datetime import datetime, timezone
 
           event_name = os.getenv("GITHUB_EVENT_NAME", "")
           should_run = True
           reason = "non-scheduled event"
 
           if event_name == "schedule":
-              kst = timezone(timedelta(hours=9))
-              now_kst = datetime.now(timezone.utc).astimezone(kst)
-              hour = now_kst.hour
-              in_window = 10 <= hour <= 23
+              now_utc = datetime.now(timezone.utc)
+              hour_utc = now_utc.hour
+              in_window = 1 <= hour_utc <= 14
               should_run = in_window
               reason = (
-                  f"in KST window {now_kst.strftime('%H:%M')}"
+                  f"in UTC active window {now_utc.strftime('%H:%M')}"
                   if in_window
-                  else f"outside KST window {now_kst.strftime('%H:%M')}"
+                  else f"outside UTC active window {now_utc.strftime('%H:%M')}"
               )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
@@ -89,19 +88,18 @@ jobs:
         run: |
           python - <<'PY'
           import os
-          from datetime import datetime, timedelta, timezone
+          from datetime import datetime, timezone
 
-          kst = timezone(timedelta(hours=9))
-          now_kst = datetime.now(timezone.utc).astimezone(kst)
-          hour = now_kst.hour
+          now_utc = datetime.now(timezone.utc)
+          hour_utc = now_utc.hour
 
-          # Continue chaining only in active update window.
-          if not (10 <= hour <= 23):
+          # Continue chaining only in active UTC window (KST 10:00~23:59).
+          if not (1 <= hour_utc <= 14):
               with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
                   f.write("CHAIN_NEXT=false\n")
               raise SystemExit(0)
 
-          sec_to_next_5 = ((5 - (now_kst.minute % 5)) % 5) * 60 - now_kst.second
+          sec_to_next_5 = ((5 - (now_utc.minute % 5)) % 5) * 60 - now_utc.second
           if sec_to_next_5 <= 0:
               sec_to_next_5 += 300
 
