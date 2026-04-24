@@ -3,9 +3,9 @@ name: Update HES Pages Data
 on:
   workflow_dispatch:
   schedule:
-    # Active window KST 10:00~23:59 (UTC 01:00~14:59): trigger every minute.
-    # Minute-level trigger helps mitigate dropped/delayed schedule events.
-    - cron: "* 1-14 * * *"
+    # GitHub Actions schedule supports a minimum 5-minute interval.
+    # KST 10:00~23:59 (UTC 01:00~14:59): every 5 minutes.
+    - cron: "*/5 1-14 * * *"
   push:
     branches:
       - main
@@ -32,55 +32,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Decide whether this run should update
-        id: gate
-        run: |
-          python - <<'PY'
-          import os
-          from datetime import datetime, timedelta, timezone
-
-          event_name = os.getenv("GITHUB_EVENT_NAME", "")
-          should_run = True
-          reason = "non-scheduled event"
-
-          if event_name == "schedule":
-              kst = timezone(timedelta(hours=9))
-              now_kst = datetime.now(timezone.utc).astimezone(kst)
-              hour = now_kst.hour
-              minute = now_kst.minute
-
-              # KST 10:00~18:29 -> every 5 minutes.
-              in_five_min_window = (10 <= hour < 18) or (hour == 18 and minute < 30)
-              # KST 18:30~23:59 -> every minute.
-              in_one_min_window = (hour == 18 and minute >= 30) or (19 <= hour <= 23)
-
-              if in_five_min_window:
-                  should_run = (minute % 5 == 0)
-                  reason = f"KST five-minute window {now_kst.strftime('%H:%M')}"
-              elif in_one_min_window:
-                  should_run = True
-                  reason = f"KST one-minute window {now_kst.strftime('%H:%M')}"
-              else:
-                  should_run = False
-                  reason = f"outside KST active window {now_kst.strftime('%H:%M')}"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"should_run={'true' if should_run else 'false'}\n")
-              f.write(f"reason={reason}\n")
-          PY
-
-      - name: Skip outside target window
-        if: steps.gate.outputs.should_run != 'true'
-        run: |
-          echo "Skipping scheduled update: ${{ steps.gate.outputs.reason }}"
-          exit 0
-
       - name: Build static page
-        if: steps.gate.outputs.should_run == 'true'
         run: python build_static_site.py
 
       - name: Commit and push if changed
-        if: steps.gate.outputs.should_run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
