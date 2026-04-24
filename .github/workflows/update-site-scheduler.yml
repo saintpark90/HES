@@ -81,3 +81,40 @@ jobs:
             git commit -m "chore: refresh next Hanwha game preview"
             git push
           fi
+
+      - name: Queue next refresh run
+        if: steps.gate.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timedelta, timezone
+
+          kst = timezone(timedelta(hours=9))
+          now_kst = datetime.now(timezone.utc).astimezone(kst)
+          hour = now_kst.hour
+
+          # Continue chaining only in active update window.
+          if not (10 <= hour <= 23):
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+                  f.write("CHAIN_NEXT=false\n")
+              raise SystemExit(0)
+
+          sec_to_next_5 = ((5 - (now_kst.minute % 5)) % 5) * 60 - now_kst.second
+          if sec_to_next_5 <= 0:
+              sec_to_next_5 += 300
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write("CHAIN_NEXT=true\n")
+              f.write(f"SLEEP_SECONDS={sec_to_next_5}\n")
+          PY
+
+          if [ "$CHAIN_NEXT" != "true" ]; then
+            echo "Skip chaining: outside active KST window"
+            exit 0
+          fi
+
+          echo "Sleeping ${SLEEP_SECONDS}s before next dispatch"
+          sleep "${SLEEP_SECONDS}"
+          gh workflow run "${GITHUB_WORKFLOW}" --ref "${GITHUB_REF_NAME}"
