@@ -6,9 +6,9 @@ on:
     # KST 10:00~18:29: every 5 minutes (UTC 01:00~09:29).
     - cron: "*/5 1-8 * * *"
     - cron: "0-25/5 9 * * *"
-    # KST 18:30~23:59: every minute (UTC 09:30~14:59).
-    - cron: "30-59 9 * * *"
-    - cron: "* 10-14 * * *"
+    # KST 18:30~23:59: every 5 minutes (UTC 09:30~14:59).
+    - cron: "30-59/5 9 * * *"
+    - cron: "*/5 10-14 * * *"
   push:
     branches:
       - main
@@ -31,47 +31,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Decide whether this run should update
-        id: gate
-        env:
-          EVENT_SCHEDULE: ${{ github.event.schedule }}
-        run: |
-          python - <<'PY'
-          import os
-
-          event_name = os.getenv("GITHUB_EVENT_NAME", "")
-          event_schedule = os.getenv("EVENT_SCHEDULE", "")
-
-          should_run = True
-          reason = "non-scheduled event"
-
-          if event_name == "schedule":
-              allowed = {
-                  "*/5 1-8 * * *",
-                  "0-25/5 9 * * *",
-                  "30-59 9 * * *",
-                  "* 10-14 * * *",
-              }
-              should_run = event_schedule in allowed
-              reason = f"scheduled refresh window: {event_schedule}"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"should_run={'true' if should_run else 'false'}\n")
-              f.write(f"reason={reason}\n")
-          PY
-
-      - name: Skip outside target window
-        if: steps.gate.outputs.should_run != 'true'
-        run: |
-          echo "Skipping scheduled update: ${{ steps.gate.outputs.reason }}"
-          exit 0
-
       - name: Build static page
-        if: steps.gate.outputs.should_run == 'true'
         run: python build_static_site.py
 
       - name: Commit and push if changed
-        if: steps.gate.outputs.should_run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
