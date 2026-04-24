@@ -16,6 +16,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: update-hes-pages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-site:
     runs-on: ubuntu-latest
