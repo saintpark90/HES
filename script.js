@@ -66,10 +66,9 @@ const renderWeatherSection = (g) => {
   if (!weather || !Array.isArray(weather.hourly) || weather.hourly.length === 0) return "";
 
   const hourlyItems = weather.hourly.map((item) => `
-      <article class="weather-hour-item">
+      <article class="weather-hour-item${item.is_game_start ? " weather-hour-item-game-start" : ""}">
         <div class="weather-time-row">
           <span class="weather-time">${item.time_label || "-"}</span>
-          ${item.is_game_start ? `<span class="weather-game-start">경기시작</span>` : ""}
         </div>
         <div class="weather-icon">${WEATHER_ICON_MAP[item.icon] || "🌤️"}</div>
         <div class="weather-desc">${item.weather || "-"}</div>
