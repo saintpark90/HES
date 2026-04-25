@@ -61,9 +61,34 @@ const WEATHER_ICON_MAP = {
   storm: "⛈️",
 };
 
+const getDustGradeMeta = (value, kind) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return { grade: "-", emoji: "❔" };
+  }
+  if (kind === "pm25") {
+    if (n <= 15) return { grade: "좋음", emoji: "😊" };
+    if (n <= 35) return { grade: "보통", emoji: "🙂" };
+    if (n <= 75) return { grade: "나쁨", emoji: "😷" };
+    return { grade: "매우 나쁨", emoji: "🤢" };
+  }
+  if (n <= 30) return { grade: "좋음", emoji: "😊" };
+  if (n <= 80) return { grade: "보통", emoji: "🙂" };
+  if (n <= 150) return { grade: "나쁨", emoji: "😷" };
+  return { grade: "매우 나쁨", emoji: "🤢" };
+};
+
 const renderWeatherSection = (g) => {
   const weather = g?.weather_info;
   if (!weather || !Array.isArray(weather.hourly) || weather.hourly.length === 0) return "";
+  const pm10Value = weather?.dust?.pm10 || "-";
+  const pm25Value = weather?.dust?.pm2_5 || "-";
+  const pm10Computed = getDustGradeMeta(pm10Value, "pm10");
+  const pm10Meta = {
+    grade: weather?.dust?.grade || pm10Computed.grade,
+    emoji: pm10Computed.emoji,
+  };
+  const pm25Meta = getDustGradeMeta(pm25Value, "pm25");
 
   const hourlyItems = weather.hourly.map((item) => `
       <article class="weather-hour-item${item.is_game_start ? " weather-hour-item-game-start" : ""}">
@@ -81,12 +106,18 @@ const renderWeatherSection = (g) => {
     <section class="weather-section">
       <h2 class="cmp-title">경기장 날씨</h2>
       <div class="weather-summary">
-        <div class="weather-summary-item">지역: ${weather.region || "-"}</div>
-        <div class="weather-summary-item">경기 진행 확률: <strong>${weather.game_progress_probability ?? "-"}%</strong></div>
-        <div class="weather-summary-item">
-          미세먼지(PM10): ${weather?.dust?.pm10 || "-"}㎍/m3 (${weather?.dust?.grade || "-"})
+        <div class="weather-summary-row">
+          <div class="weather-summary-item">지역: ${weather.region || "-"}</div>
+          <div class="weather-summary-item">경기 진행 확률: <strong>${weather.game_progress_probability ?? "-"}%</strong></div>
         </div>
-        <div class="weather-summary-item">초미세먼지(PM2.5): ${weather?.dust?.pm2_5 || "-"}㎍/m3</div>
+        <div class="weather-summary-row">
+          <div class="weather-summary-item">
+            미세먼지(PM10): ${pm10Value}㎍/m3 · ${pm10Meta.grade} ${pm10Meta.emoji}
+          </div>
+          <div class="weather-summary-item">
+            초미세먼지(PM2.5): ${pm25Value}㎍/m3 · ${pm25Meta.grade} ${pm25Meta.emoji}
+          </div>
+        </div>
       </div>
       <div class="weather-hourly-wrap">
         <div class="weather-hourly-grid">
