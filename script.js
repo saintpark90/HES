@@ -144,11 +144,22 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead) => {
     `;
 
     const last5Row = (awayLast5, homeLast5) => {
-      const dots = (seq) => seq.split("").map(c => {
-        if (c === "승") return `<span class="dot win">승</span>`;
-        if (c === "패") return `<span class="dot loss">패</span>`;
-        return `<span class="dot draw">무</span>`;
-      }).join("");
+      // KBO `last5` is oldest→newest; the last 승/패/무 is the most recent (오른쪽, 네이버 레드닷과 동일).
+      const dots = (seq) => {
+        const out = [];
+        for (const c of String(seq || "")) {
+          if (c === "승" || c === "패" || c === "무") out.push(c);
+        }
+        if (out.length === 0) return "—";
+        const lastI = out.length - 1;
+        return out
+          .map((c, i) => {
+            const kind = c === "승" ? "win" : c === "패" ? "loss" : "draw";
+            const latest = i === lastI ? " last5-latest" : "";
+            return `<span class="dot ${kind}${latest}">${c}</span>`;
+          })
+          .join("");
+      };
       return `
         <tr>
           <td class="cmp-val">${dots(awayLast5)}</td>

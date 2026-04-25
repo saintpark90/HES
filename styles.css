@@ -390,6 +390,13 @@ h1 {
 .dot.loss { background: #4c6ef5; }
 .dot.draw { background: #aaa; }
 
+/* 가장 최근 1경기(문자열 마지막 승/패/무) — 네이버 레드닷과 같은 역할, 주황 테두리 */
+.dot.last5-latest {
+  box-shadow: 0 0 0 2px #ff6600;
+  position: relative;
+  z-index: 1;
+}
+
 /* ── 공유 노트 ────────────────────────────────────── */
 .share-note {
   margin-top: 20px;
