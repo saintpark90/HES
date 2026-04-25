@@ -1044,9 +1044,25 @@ def _extract_live_text_hanwha_stats(
                     pitcher_detail_rows = rows
                     continue
         if "타" in caption:
-            if len(first) >= 5 and re.match(r"^\d+$", first[0] or ""):
+            is_lineup_candidate = (
+                len(first) >= 5
+                and re.match(r"^\d+$", first[0] or "")
+                and (
+                    (len(first) >= 3 and re.match(r"^\d+$", first[1] or "") and not re.match(r"^\d+$", first[2] or ""))
+                    or (len(first) >= 2 and not re.match(r"^\d+$", first[1] or ""))
+                )
+            )
+            is_batter_candidate = (
+                len(first) >= 4
+                and not re.match(r"^\d+$", first[0] or "")
+                and _looks_numeric_token(first[1] if len(first) > 1 else "")
+            )
+
+            # Prefer the first clear lineup table to avoid later "타자기록" tables overriding it.
+            if is_lineup_candidate and not lineup_rows:
                 lineup_rows = rows
-            elif len(first) >= 4 and not re.match(r"^\d+$", first[0] or ""):
+                continue
+            if is_batter_candidate and not batter_rows:
                 batter_rows = rows
 
     batters: list[Dict[str, str]] = []
@@ -1058,19 +1074,37 @@ def _extract_live_text_hanwha_stats(
     for row in lineup_rows:
         if len(row) < 5:
             continue
-        order = row[0]
+        if (
+            len(row) >= 3
+            and re.match(r"^\d+$", row[0] or "")
+            and re.match(r"^\d+$", row[1] or "")
+            and not re.match(r"^\d+$", row[2] or "")
+        ):
+            order = row[0]
+            name = row[2]
+            fallback_ab = row[3] if len(row) > 3 else "-"
+            fallback_hit = row[4] if len(row) > 4 else "-"
+            fallback_run = row[5] if len(row) > 5 else "-"
+        elif re.match(r"^\d+$", row[0] or "") and len(row) >= 2:
+            order = row[0]
+            name = row[1]
+            fallback_ab = row[2] if len(row) > 2 else "-"
+            fallback_hit = row[3] if len(row) > 3 else "-"
+            fallback_run = row[4] if len(row) > 4 else "-"
+        else:
+            continue
         if not re.match(r"^\d+$", order):
             continue
-        name = row[1]
+        has_detail = name in detail_by_name
         detail = detail_by_name.get(name, row)
         batters.append(
             {
                 "order": order,
                 "position": "-",
                 "name": name,
-                "ab": detail[1] if len(detail) > 1 else (row[2] if len(row) > 2 else "-"),
-                "hit": detail[2] if len(detail) > 2 else (row[3] if len(row) > 3 else "-"),
-                "run": detail[3] if len(detail) > 3 else (row[4] if len(row) > 4 else "-"),
+                "ab": (detail[1] if has_detail and len(detail) > 1 else fallback_ab),
+                "hit": (detail[2] if has_detail and len(detail) > 2 else fallback_hit),
+                "run": (detail[3] if has_detail and len(detail) > 3 else fallback_run),
                 "avg": "-",
             }
         )
