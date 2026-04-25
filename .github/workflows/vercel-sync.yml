@@ -1,0 +1,24 @@
+name: Sync Vercel (he-nextgame)
+
+# GitHub Pages용 GHA는 main에 커밋하지만, Vercel은 별도 배포라 최신 커밋을 당겨오지 않을 수 있음.
+# Vercel 대시보드 → Project → Settings → Git → Deploy Hooks 에서 Production Hook URL을 만들고
+# 저장소 Secrets에 VERCEL_DEPLOY_HOOK 으로 넣으면, main 푸시마다 프로덕션 재배포가 걸림.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-hook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel production deploy
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK" ]; then
+            echo "::notice::VERCEL_DEPLOY_HOOK is not set. Add a Vercel Deploy Hook URL in repo Secrets to sync https://he-nextgame.vercel.app/ with GitHub."
+            exit 0
+          fi
+          curl -fsS -X POST "$VERCEL_DEPLOY_HOOK"
+          echo "Vercel deploy hook accepted."
