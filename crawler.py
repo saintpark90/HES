@@ -875,10 +875,11 @@ def _build_lineup_info(
     lineup_data = _fetch_lineup_analysis(game_id=game_id, season_id=season_id, sr_id=sr_id)
     today_lineup = lineup_data.get("away_lineup", []) if is_hanwha_away else lineup_data.get("home_lineup", [])
     is_today_target = target_date == date.today()
+    can_trust_today_lineup = bool(lineup_data.get("lineup_ck")) or _is_live_game(game) or _is_final_game(game)
 
     # KBO can return full lineup rows while LINEUP_CK remains false.
     # Prefer actual lineup rows when present to avoid stale fallback display.
-    if is_today_target and len(today_lineup) >= 9:
+    if is_today_target and len(today_lineup) >= 9 and can_trust_today_lineup:
         realtime_stats = _fetch_hanwha_game_boxscore_stats(game=game, game_date=target_date)
         if not realtime_stats.get("batters") or not realtime_stats.get("pitchers"):
             live_stats = _extract_live_text_hanwha_stats(
