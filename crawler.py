@@ -38,6 +38,12 @@ OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPENMETEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 KST = ZoneInfo("Asia/Seoul")
 
+
+def _today_kst() -> date:
+    """KBO schedules and Korean 'today' for UI must use Asia/Seoul, not server local/UTC date."""
+    return datetime.now(KST).date()
+
+
 TEAM_NAME_TO_ID = {
     "KT": "KT",
     "LG": "LG",
@@ -846,6 +852,57 @@ def _find_latest_finished_hanwha_game(before_date: date, max_days_lookback: int 
     return None
 
 
+def _hanwha_game_on_calendar_day(game_day: date) -> Optional[Dict[str, Any]]:
+    """Most recent Hanwha game on a calendar day (one ID per day, latest by KBO time if multiple)."""
+    try:
+        games = _fetch_games(game_day)
+    except Exception:
+        return None
+    candidates = [g for g in games if _is_hanwha_game(g)]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda g: (str(g.get("G_TM", "") or ""), str(g.get("G_ID", "") or "")),
+        reverse=True,
+    )
+    g = dict(candidates[0])
+    g["_resolved_date"] = game_day
+    return g
+
+
+def _try_prior_calendar_lineup_boxscore(
+    target_date: date,
+) -> Optional[tuple[date, Dict[str, list[Dict[str, str]]]]]:
+    """
+    For an upcoming (or not-yet-reliable) game on target_date, prefer the *previous calendar
+    day* Hanwha box score. The game list often lags on GAME_STATE/SCORE flags; box score
+    is usually up right after the last pitch, so this matches '전날' better than a scan
+    that requires SCORE_CK/final in the list API.
+    """
+    prev = target_date - timedelta(days=1)
+    if prev.year < 2000:
+        return None
+    g = _hanwha_game_on_calendar_day(prev)
+    if not g:
+        return None
+    d = g.get("_resolved_date") or prev
+    season_id = str(g.get("SEASON_ID") or d.year)
+    game_id = str(g.get("G_ID") or "")
+    sr_id = str(g.get("SR_ID") or "0")
+    stats = _fetch_hanwha_game_boxscore_stats(game=g, game_date=d)
+    if not (stats.get("batters") or stats.get("pitchers")) and game_id:
+        # Box score JSON can lag after final; LiveText often fills first.
+        stats = _extract_live_text_hanwha_stats(
+            game=g,
+            season_id=season_id,
+            game_id=game_id,
+            sr_id=sr_id,
+        )
+    if not (stats.get("batters") or stats.get("pitchers")):
+        return None
+    return (d, stats)
+
+
 def _fetch_box_score_scroll(game: Dict[str, Any], game_date: date) -> Dict[str, Any]:
     payload = {
         "leId": "1",
@@ -1241,7 +1298,7 @@ def _build_lineup_info(
     is_hanwha_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
     lineup_data = _fetch_lineup_analysis(game_id=game_id, season_id=season_id, sr_id=sr_id)
     today_lineup = lineup_data.get("away_lineup", []) if is_hanwha_away else lineup_data.get("home_lineup", [])
-    is_today_target = target_date == date.today()
+    is_today_target = target_date == _today_kst()
     can_trust_today_lineup = bool(lineup_data.get("lineup_ck")) or _is_live_game(game) or _is_final_game(game)
 
     # KBO can return full lineup rows while LINEUP_CK remains false.
@@ -1259,6 +1316,14 @@ def _build_lineup_info(
                 realtime_stats["batters"] = live_stats.get("batters", [])
             if not realtime_stats.get("pitchers"):
                 realtime_stats["pitchers"] = live_stats.get("pitchers", [])
+        if not realtime_stats.get("batters") or not realtime_stats.get("pitchers"):
+            prior_cal = _try_prior_calendar_lineup_boxscore(target_date)
+            if prior_cal:
+                _pd, prior_stats = prior_cal
+                if not realtime_stats.get("batters"):
+                    realtime_stats["batters"] = prior_stats.get("batters", [])
+                if not realtime_stats.get("pitchers"):
+                    realtime_stats["pitchers"] = prior_stats.get("pitchers", [])
         if not realtime_stats.get("batters") or not realtime_stats.get("pitchers"):
             latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
             if latest_game:
@@ -1305,18 +1370,22 @@ def _build_lineup_info(
             "pitchers": realtime_pitchers,
         }
 
-    latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
-    if not latest_game:
-        return {
-            "is_official": False,
-            "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
-            "source_game_date": "",
-            "batters": [],
-            "pitchers": [],
-        }
+    prior_first = _try_prior_calendar_lineup_boxscore(target_date)
+    if prior_first:
+        latest_game_date, fallback_stats = prior_first
+    else:
+        latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
+        if not latest_game:
+            return {
+                "is_official": False,
+                "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
+                "source_game_date": "",
+                "batters": [],
+                "pitchers": [],
+            }
 
-    latest_game_date = latest_game.get("_resolved_date") or (target_date - timedelta(days=1))
-    fallback_stats = _fetch_hanwha_game_boxscore_stats(game=latest_game, game_date=latest_game_date)
+        latest_game_date = latest_game.get("_resolved_date") or (target_date - timedelta(days=1))
+        fallback_stats = _fetch_hanwha_game_boxscore_stats(game=latest_game, game_date=latest_game_date)
     probe_date = latest_game_date
     while (
         not fallback_stats.get("batters")
@@ -1945,7 +2014,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
     latest_news = _fetch_latest_hanwha_news(limit=5)
-    today = date.today()
+    today = _today_kst()
     today_final_hanwha_game: Optional[Dict[str, Any]] = None
     try:
         today_games = _fetch_games(today)
@@ -1968,9 +2037,14 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
         for game in games:
             if not _is_hanwha_game(game):
                 continue
-            # KBO can report SCORE_CK=1 before first pitch, so only skip true final games.
-            if offset == 0 and _is_final_game(game):
-                continue
+            # Skip today's game once it is over so "다음 경기" is tomorrow (KST). SCORE_CK can appear
+            # before the first pitch; only treat non-scheduled(1) finished scores as "done".
+            if offset == 0:
+                if _is_final_game(game):
+                    continue
+                if _is_finished_game(game) and not _is_live_game(game):
+                    if (str(game.get("GAME_STATE_SC", "") or "").strip() != "1"):
+                        continue
 
             is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
             opponent_name = game.get("HOME_NM") if is_away else game.get("AWAY_NM")
