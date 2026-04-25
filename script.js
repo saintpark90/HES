@@ -638,5 +638,14 @@ const schedulerTick = () => {
 };
 
 renderGame(game, updatedAt);
+
+// GitHub Pages 정적 JSON은 GHA가 수 커밋해도, 첫 페인트·라이브창 밖에서는 갱신 fetch가 안 돌아가
+// `마지막 갱신`이 오래된 것처럼 보인다. 로드 시와 5분마다 항상 최신 game-data.json을 받는다.
+void refreshGameInfo();
+if (window.__hesDataInterval) {
+  clearInterval(window.__hesDataInterval);
+}
+window.__hesDataInterval = setInterval(refreshGameInfo, 5 * 60 * 1000);
+
 schedulerTick();
 schedulerTimer = setInterval(schedulerTick, 30 * 1000);

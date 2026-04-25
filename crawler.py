@@ -867,6 +867,86 @@ def _fetch_box_score_scroll(game: Dict[str, Any], game_date: date) -> Dict[str, 
         return {}
 
 
+def _text_has_hangul(value: str) -> bool:
+    return bool(re.search(r"[가-힣]", value or ""))
+
+
+def _is_plausible_batter_count(value: str) -> bool:
+    """Boxscore 타수/안타/득점에 들어갈 수 있는 토큰."""
+    t = (value or "").strip()
+    if t in {"", "-"}:
+        return True
+    if _text_has_hangul(t):
+        return False
+    return bool(re.match(r"^\d+(\.\d+)?$", t)) or t in {"0", "0.0"}
+
+
+def _find_stat_row_for_batter(
+    player_name: str, stat_row_objects: list, default_idx: int
+) -> list[Dict[str, Any]]:
+    """
+    table1(이름)과 table3(타자기록) 행이 인덱스로 꼭 맞지 않는 경우가 있어,
+    table3 셀 전반에서 선수명이 들어가는 행을 먼저 찾는다.
+    """
+    for i, srow in enumerate(stat_row_objects or []):
+        cells = (srow or {}).get("row", []) if isinstance(srow, dict) else []
+        for cell in cells[:5]:
+            if _cell_text(cell) == player_name:
+                return cells
+    if 0 <= default_idx < len(stat_row_objects or []):
+        srow = stat_row_objects[default_idx] or {}
+        return srow.get("row", [])
+    return []
+
+
+def _parse_batter_stats_cells(stat_cells: list, player_name: str) -> tuple[str, str, str, str]:
+    t = [_cell_text(c) for c in (stat_cells or [])]
+    if not t:
+        return ("-", "-", "-", "-")
+    for _ in range(2):
+        if t and t[0] == player_name and len(t) > 1:
+            t = t[1:]
+    if t and (not _is_plausible_batter_count(t[0]) or _text_has_hangul(t[0])):
+        if len(t) > 1 and _is_plausible_batter_count(t[1]) and not _text_has_hangul(t[1]):
+            t = t[1:]
+    if len(t) >= 5:
+        at_bats, hits, runs, avg = t[0], t[1], t[3], t[4]
+    elif len(t) >= 4:
+        at_bats, hits, runs, avg = t[0], t[1], t[2], t[3]
+    else:
+        at_bats = hits = runs = avg = "-"
+
+    def _coerce_count(val: str) -> str:
+        s = (val or "").strip()
+        if s == player_name or _text_has_hangul(s) or (s and not _is_plausible_batter_count(s)):
+            return "-"
+        return s or "-"
+
+    at_bats = _coerce_count(str(at_bats))
+    hits = _coerce_count(str(hits))
+    runs = _coerce_count(str(runs))
+    avg = (str(avg) or "-").strip()
+    if _text_has_hangul(avg) and avg not in ("-", ""):
+        avg = "-"
+    return (at_bats, hits, runs, avg)
+
+
+def _sanitize_merged_batter_line(player_name: str, stat: Dict[str, str]) -> Dict[str, str]:
+    """
+    by_order/by_name로 붙은 스탯이 선수명(한글)이 섞인 경우 UI에서 타수=이름으로 보이는 문제를 막는다.
+    """
+    out = {**stat}
+    p = (player_name or "").strip()
+    for key in ("ab", "hit", "run"):
+        v = str(out.get(key, "") or "").strip()
+        if not v or v == p or (v and _text_has_hangul(v)):
+            out[key] = "-"
+    avg = str(out.get("avg", "") or "").strip()
+    if avg and _text_has_hangul(avg):
+        out["avg"] = "-"
+    return out
+
+
 def _extract_hanwha_boxscore_batters(
     box_data: Dict[str, Any],
     game: Dict[str, Any],
@@ -890,16 +970,15 @@ def _extract_hanwha_boxscore_batters(
         return []
 
     name_rows = table_names.get("rows", []) or []
-    stat_rows = table_stats.get("rows", []) or []
-    row_count = min(len(name_rows), len(stat_rows))
-    if row_count == 0:
+    stat_row_objects = table_stats.get("rows", []) or []
+    if not name_rows or not stat_row_objects:
         return []
 
+    row_count = len(name_rows)
     lineup_map: Dict[str, Dict[str, str]] = {}
     for idx in range(row_count):
         name_cells = (name_rows[idx] or {}).get("row", [])
-        stat_cells = (stat_rows[idx] or {}).get("row", [])
-        if len(name_cells) < 3 or len(stat_cells) < 5:
+        if len(name_cells) < 3:
             continue
 
         order = _cell_text(name_cells[0])
@@ -910,10 +989,10 @@ def _extract_hanwha_boxscore_batters(
             continue
 
         position = _cell_text(name_cells[1])
-        at_bats = _cell_text(stat_cells[0]) or "-"
-        hits = _cell_text(stat_cells[1]) or "-"
-        runs = _cell_text(stat_cells[3]) or "-"
-        avg = _cell_text(stat_cells[4]) or "-"
+        stat_cells = _find_stat_row_for_batter(player_name, stat_row_objects, min(idx, len(stat_row_objects) - 1))
+        if len(stat_cells) < 3:
+            continue
+        at_bats, hits, runs, avg = _parse_batter_stats_cells(stat_cells, player_name)
         lineup_map[order] = {
             "order": order,
             "position": position,
@@ -1143,7 +1222,11 @@ def _extract_live_text_hanwha_stats(
                 }
             )
 
-    batters = [b for b in batters if b.get("name")]
+    batters = [
+        _sanitize_merged_batter_line(str(b.get("name", "")), b)
+        for b in batters
+        if b.get("name")
+    ]
     pitchers = [p for p in pitchers if p.get("name")]
     return {"batters": batters[:9], "pitchers": pitchers}
 
@@ -1202,6 +1285,7 @@ def _build_lineup_info(
             order = str(item.get("order", "-"))
             name = str(item.get("name", "-"))
             stat_src = by_order.get(order) or by_name.get(name) or {}
+            stat_src = _sanitize_merged_batter_line(name, stat_src)
             merged_batters.append(
                 {
                     "order": order,
@@ -1246,11 +1330,15 @@ def _build_lineup_info(
         fallback_stats = _fetch_hanwha_game_boxscore_stats(game=older_game, game_date=older_date)
         latest_game_date = older_date
         probe_date = older_date
+    fallback_batters = fallback_stats.get("batters", []) or []
     return {
         "is_official": False,
         "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
         "source_game_date": latest_game_date.isoformat(),
-        "batters": fallback_stats.get("batters", []),
+        "batters": [
+            _sanitize_merged_batter_line(str(b.get("name", "")), b) if isinstance(b, dict) else b
+            for b in fallback_batters
+        ],
         "pitchers": fallback_stats.get("pitchers", []),
     }
 
