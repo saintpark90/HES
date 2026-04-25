@@ -1348,6 +1348,77 @@ def _apply_final_game_to_head_to_head(
     }
 
 
+def _parse_season_record(record: str) -> tuple[int, int, int]:
+    match = re.search(r"(\d+)\s*승\s*(\d+)\s*패\s*(\d+)\s*무", str(record or ""))
+    if not match:
+        return (0, 0, 0)
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _format_season_record(wins: int, losses: int, draws: int) -> str:
+    return f"{wins}승 {losses}패 {draws}무"
+
+
+def _apply_outcome_to_last5(last5: str, outcome: str) -> str:
+    tokens = [ch for ch in str(last5 or "") if ch in {"승", "패", "무"}]
+    tokens.append(outcome)
+    return "".join(tokens[-5:]) if tokens else outcome
+
+
+def _apply_final_game_to_team_comparison(
+    team_comparison: Dict[str, Any],
+    final_game: Dict[str, Any],
+    away_team: str,
+    home_team: str,
+) -> Dict[str, Any]:
+    if not isinstance(team_comparison, dict) or not final_game:
+        return team_comparison
+    if not _is_final_game(final_game):
+        return team_comparison
+
+    final_away = str(final_game.get("AWAY_NM", "") or "")
+    final_home = str(final_game.get("HOME_NM", "") or "")
+    if not final_away or not final_home:
+        return team_comparison
+
+    try:
+        away_score = int(str(final_game.get("T_SCORE_CN", "0") or "0"))
+        home_score = int(str(final_game.get("B_SCORE_CN", "0") or "0"))
+    except Exception:
+        return team_comparison
+
+    if away_score > home_score:
+        final_outcomes = {final_away: "승", final_home: "패"}
+    elif away_score < home_score:
+        final_outcomes = {final_away: "패", final_home: "승"}
+    else:
+        final_outcomes = {final_away: "무", final_home: "무"}
+
+    adjusted = dict(team_comparison)
+    for side_key, team_name in (("away", away_team), ("home", home_team)):
+        side = adjusted.get(side_key)
+        if not isinstance(side, dict):
+            continue
+        outcome = final_outcomes.get(team_name)
+        if not outcome:
+            continue
+
+        wins, losses, draws = _parse_season_record(str(side.get("season_record", "")))
+        if outcome == "승":
+            wins += 1
+        elif outcome == "패":
+            losses += 1
+        else:
+            draws += 1
+
+        next_side = dict(side)
+        next_side["season_record"] = _format_season_record(wins, losses, draws)
+        next_side["last5"] = _apply_outcome_to_last5(str(side.get("last5", "")), outcome)
+        adjusted[side_key] = next_side
+
+    return adjusted
+
+
 def has_hanwha_game_on_date(target_date: date) -> bool:
     try:
         games = _fetch_games(target_date)
@@ -1597,6 +1668,13 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             away_starter_stats["war"] = away_analysis.get("war") or away_starter_stats.get("war") or "-"
             home_starter_stats["war"] = home_analysis.get("war") or home_starter_stats.get("war") or "-"
             team_comparison = _fetch_team_comparison(game_id, season_id, away_team_id, home_team_id)
+            if offset > 0 and today_final_hanwha_game:
+                team_comparison = _apply_final_game_to_team_comparison(
+                    team_comparison=team_comparison,
+                    final_game=today_final_hanwha_game,
+                    away_team=str(game.get("AWAY_NM", "") or ""),
+                    home_team=str(game.get("HOME_NM", "") or ""),
+                )
             head_to_head_summary = _find_head_to_head_record(
                 rank_daily.get("head_to_head", []),
                 game.get("AWAY_NM", ""),
