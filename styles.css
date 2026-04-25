@@ -175,7 +175,8 @@ h1 {
 }
 
 .weather-hourly-wrap {
-  overflow-x: auto;
+  overflow-x: scroll;
+  scrollbar-gutter: stable both-edges;
   padding-bottom: 4px;
 }
 
@@ -192,7 +193,7 @@ h1 {
   padding: 8px;
   background: #fff;
   text-align: center;
-  flex: 0 0 96px;
+  flex: 0 0 84px;
 }
 
 .weather-time-row {
@@ -234,6 +235,24 @@ h1 {
 .weather-temp {
   color: #444;
   font-weight: 700;
+}
+
+.weather-hourly-wrap::-webkit-scrollbar {
+  height: 10px;
+}
+
+.weather-hourly-wrap::-webkit-scrollbar-track {
+  background: #f2f2f2;
+  border-radius: 999px;
+}
+
+.weather-hourly-wrap::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+  border-radius: 999px;
+}
+
+.weather-hourly-wrap::-webkit-scrollbar-thumb:hover {
+  background: #b2b2b2;
 }
 
 /* ── 팀 전력 비교 ─────────────────────────────────── */
@@ -716,6 +735,6 @@ h1 {
   }
 
   .weather-hour-item {
-    flex-basis: 90px;
+    flex-basis: 80px;
   }
 }
