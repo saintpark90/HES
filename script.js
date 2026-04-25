@@ -114,6 +114,8 @@ const renderWeatherSection = (g) => {
           <div class="weather-summary-item">
             미세먼지(PM10): ${pm10Value}㎍/m3 · ${pm10Meta.grade} ${pm10Meta.emoji}
           </div>
+        </div>
+        <div class="weather-summary-row">
           <div class="weather-summary-item">
             초미세먼지(PM2.5): ${pm25Value}㎍/m3 · ${pm25Meta.grade} ${pm25Meta.emoji}
           </div>
