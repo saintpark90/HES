@@ -180,10 +180,10 @@ h1 {
 }
 
 .weather-hourly-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(96px, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
   gap: 8px;
-  min-width: 620px;
+  width: max-content;
 }
 
 .weather-hour-item {
@@ -192,6 +192,7 @@ h1 {
   padding: 8px;
   background: #fff;
   text-align: center;
+  flex: 0 0 96px;
 }
 
 .weather-time-row {
@@ -711,7 +712,10 @@ h1 {
   }
 
   .weather-hourly-grid {
-    grid-template-columns: repeat(6, minmax(90px, 1fr));
-    min-width: 560px;
+    gap: 6px;
+  }
+
+  .weather-hour-item {
+    flex-basis: 90px;
   }
 }
