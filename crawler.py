@@ -872,7 +872,7 @@ def _hanwha_game_on_calendar_day(game_day: date) -> Optional[Dict[str, Any]]:
 
 def _try_prior_calendar_lineup_boxscore(
     target_date: date,
-) -> Optional[tuple[date, Dict[str, list[Dict[str, str]]]]]:
+) -> Optional[tuple[date, Dict[str, list[Dict[str, str]]], Dict[str, Any]]]:
     """
     For an upcoming (or not-yet-reliable) game on target_date, prefer the *previous calendar
     day* Hanwha box score. The game list often lags on GAME_STATE/SCORE flags; box score
@@ -900,7 +900,7 @@ def _try_prior_calendar_lineup_boxscore(
         )
     if not (stats.get("batters") or stats.get("pitchers")):
         return None
-    return (d, stats)
+    return (d, stats, g)
 
 
 def _fetch_box_score_scroll(game: Dict[str, Any], game_date: date) -> Dict[str, Any]:
@@ -1284,8 +1284,70 @@ def _extract_live_text_hanwha_stats(
         for b in batters
         if b.get("name")
     ]
+    batters = sorted(
+        batters,
+        key=lambda b: int(str(b.get("order", "99")).strip())
+        if str(b.get("order", "")).strip().isdigit()
+        else 99,
+    )
     pitchers = [p for p in pitchers if p.get("name")]
     return {"batters": batters[:9], "pitchers": pitchers}
+
+
+def _merge_lineup_grid_with_batter_stats(
+    lineup_grid: list[Dict[str, Any]],
+    stat_batters: list[Dict[str, str]],
+) -> list[Dict[str, str]]:
+    """
+    KBO GetLineUpAnalysis row order (타순·포지션·이름) + box/live 스탯.
+    Name match first: LiveText/박스 order 필드는 경기 직후 흔들릴 수 있음.
+    """
+    stat_batters = stat_batters or []
+    by_order: Dict[str, Dict[str, str]] = {
+        str(item.get("order") or ""): item
+        for item in stat_batters
+        if str(item.get("order") or "")
+    }
+    by_name: Dict[str, Dict[str, str]] = {
+        str(item.get("name") or ""): item
+        for item in stat_batters
+        if str(item.get("name") or "")
+    }
+    out: list[Dict[str, str]] = []
+    for item in lineup_grid[:9]:
+        order = str(item.get("order", "-"))
+        name = str(item.get("name", "-"))
+        stat_src = by_name.get(name) or by_order.get(order) or {}
+        stat_src = _sanitize_merged_batter_line(name, stat_src)
+        out.append(
+            {
+                "order": order,
+                "position": str(item.get("position", "-") or "-"),
+                "name": name,
+                "ab": stat_src.get("ab", "-"),
+                "hit": stat_src.get("hit", "-"),
+                "run": stat_src.get("run", "-"),
+                "avg": stat_src.get("avg", "-"),
+            }
+        )
+    return out
+
+
+def _order_batter_rows_for_display(batters: list) -> list[Dict[str, str]]:
+    if not batters:
+        return []
+    rows: list[Dict[str, str]] = []
+    for b in batters:
+        if not isinstance(b, dict):
+            continue
+        name = str(b.get("name", "") or "")
+        rows.append(_sanitize_merged_batter_line(name, dict(b)))
+    return sorted(
+        rows,
+        key=lambda b: int(str(b.get("order", "99")).strip())
+        if str(b.get("order", "")).strip().isdigit()
+        else 99,
+    )
 
 
 def _build_lineup_info(
@@ -1319,7 +1381,7 @@ def _build_lineup_info(
         if not realtime_stats.get("batters") or not realtime_stats.get("pitchers"):
             prior_cal = _try_prior_calendar_lineup_boxscore(target_date)
             if prior_cal:
-                _pd, prior_stats = prior_cal
+                _pd, prior_stats, _pg = prior_cal
                 if not realtime_stats.get("batters"):
                     realtime_stats["batters"] = prior_stats.get("batters", [])
                 if not realtime_stats.get("pitchers"):
@@ -1335,33 +1397,7 @@ def _build_lineup_info(
                     realtime_stats["pitchers"] = fallback_stats.get("pitchers", [])
         realtime_batters = realtime_stats.get("batters", [])
         realtime_pitchers = realtime_stats.get("pitchers", [])
-        by_order = {
-            str(item.get("order") or ""): item
-            for item in realtime_batters
-            if str(item.get("order") or "")
-        }
-        by_name = {
-            str(item.get("name") or ""): item
-            for item in realtime_batters
-            if str(item.get("name") or "")
-        }
-        merged_batters = []
-        for item in today_lineup[:9]:
-            order = str(item.get("order", "-"))
-            name = str(item.get("name", "-"))
-            stat_src = by_order.get(order) or by_name.get(name) or {}
-            stat_src = _sanitize_merged_batter_line(name, stat_src)
-            merged_batters.append(
-                {
-                    "order": order,
-                    "position": item.get("position", "-"),
-                    "name": name,
-                    "ab": stat_src.get("ab", "-"),
-                    "hit": stat_src.get("hit", "-"),
-                    "run": stat_src.get("run", "-"),
-                    "avg": stat_src.get("avg", "-"),
-                }
-            )
+        merged_batters = _merge_lineup_grid_with_batter_stats(today_lineup, realtime_batters)
         return {
             "is_official": True,
             "notice": "",
@@ -1372,7 +1408,7 @@ def _build_lineup_info(
 
     prior_first = _try_prior_calendar_lineup_boxscore(target_date)
     if prior_first:
-        latest_game_date, fallback_stats = prior_first
+        latest_game_date, fallback_stats, _ = prior_first
     else:
         latest_game = _find_latest_finished_hanwha_game(before_date=target_date)
         if not latest_game:
@@ -1400,14 +1436,27 @@ def _build_lineup_info(
         latest_game_date = older_date
         probe_date = older_date
     fallback_batters = fallback_stats.get("batters", []) or []
+    g_day = _hanwha_game_on_calendar_day(latest_game_date)
+    display_batters: list[Dict[str, str]] = []
+    if g_day and str(g_day.get("G_ID") or ""):
+        is_hw_away = g_day.get("AWAY_ID") == HANWHA_TEAM_ID
+        prior_lineup_data = _fetch_lineup_analysis(
+            game_id=str(g_day.get("G_ID") or ""),
+            season_id=str(g_day.get("SEASON_ID") or latest_game_date.year),
+            sr_id=str(g_day.get("SR_ID") or "0"),
+        )
+        prior_grid = (
+            prior_lineup_data.get("away_lineup", []) if is_hw_away else prior_lineup_data.get("home_lineup", [])
+        )
+        if len(prior_grid) >= 1:
+            display_batters = _merge_lineup_grid_with_batter_stats(prior_grid, fallback_batters)
+    if not display_batters:
+        display_batters = _order_batter_rows_for_display(fallback_batters)
     return {
         "is_official": False,
         "notice": "아직 라인업이 발표되지 않아 전날 라인업을 보여드립니다.",
         "source_game_date": latest_game_date.isoformat(),
-        "batters": [
-            _sanitize_merged_batter_line(str(b.get("name", "")), b) if isinstance(b, dict) else b
-            for b in fallback_batters
-        ],
+        "batters": display_batters,
         "pitchers": fallback_stats.get("pitchers", []),
     }
 
