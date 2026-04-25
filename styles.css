@@ -158,6 +158,83 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+.weather-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.weather-summary-item {
+  border: 1px solid #ececec;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  font-size: 12px;
+  color: #555;
+}
+
+.weather-hourly-wrap {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.weather-hourly-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(96px, 1fr));
+  gap: 8px;
+  min-width: 620px;
+}
+
+.weather-hour-item {
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  padding: 8px;
+  background: #fff;
+  text-align: center;
+}
+
+.weather-time-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.weather-time {
+  font-size: 12px;
+  color: #555;
+  font-weight: 700;
+}
+
+.weather-game-start {
+  font-size: 10px;
+  color: #d14000;
+  background: #fff2ea;
+  border: 1px solid #ffd7bf;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.weather-icon {
+  margin-top: 4px;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.weather-desc,
+.weather-pop,
+.weather-temp {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #666;
+}
+
+.weather-temp {
+  color: #444;
+  font-weight: 700;
+}
+
 /* ── 팀 전력 비교 ─────────────────────────────────── */
 .cmp-section {
   margin-top: 24px;
@@ -170,6 +247,7 @@ h1 {
 .series-section,
 .eagles-tv-section,
 .news-section,
+.weather-section,
 .rank-section {
   margin-top: 24px;
   padding-top: 20px;
@@ -625,4 +703,15 @@ h1 {
   width: 22px;
   height: 22px;
   object-fit: contain;
+}
+
+@media (max-width: 640px) {
+  .weather-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .weather-hourly-grid {
+    grid-template-columns: repeat(6, minmax(90px, 1fr));
+    min-width: 560px;
+  }
 }

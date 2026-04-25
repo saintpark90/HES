@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 import xml.etree.ElementTree as ET
 import time
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,6 +34,9 @@ EAGLES_HIGHLIGHT_PLAYLIST_ID = "PLH13Vc2FtHHh-syagRtonzJLl-SkG3B7Q"
 EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
 NAVER_SPORTS_NEWS_API_URL = "https://api-gw.sports.naver.com/news/articles/kbaseball"
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list={playlist_id}"
+OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+OPENMETEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+KST = ZoneInfo("Asia/Seoul")
 
 TEAM_NAME_TO_ID = {
     "KT": "KT",
@@ -46,6 +50,252 @@ TEAM_NAME_TO_ID = {
     "롯데": "LT",
     "키움": "WO",
 }
+
+STADIUM_REGION_COORDS = {
+    "잠실": {"region": "서울 잠실", "lat": 37.5121, "lon": 127.0719},
+    "고척": {"region": "서울 고척", "lat": 37.4982, "lon": 126.8671},
+    "문학": {"region": "인천 문학", "lat": 37.4369, "lon": 126.6931},
+    "수원": {"region": "수원", "lat": 37.2998, "lon": 127.0096},
+    "대전": {"region": "대전", "lat": 36.3171, "lon": 127.4281},
+    "대구": {"region": "대구", "lat": 35.8410, "lon": 128.6811},
+    "광주": {"region": "광주", "lat": 35.1680, "lon": 126.8891},
+    "사직": {"region": "부산 사직", "lat": 35.1943, "lon": 129.0615},
+    "창원": {"region": "창원", "lat": 35.2222, "lon": 128.5822},
+    "포항": {"region": "포항", "lat": 36.0147, "lon": 129.3650},
+    "울산": {"region": "울산", "lat": 35.5351, "lon": 129.2582},
+}
+
+WEATHER_CODE_TEXT = {
+    0: "맑음",
+    1: "대체로 맑음",
+    2: "부분 흐림",
+    3: "흐림",
+    45: "안개",
+    48: "짙은 안개",
+    51: "약한 이슬비",
+    53: "이슬비",
+    55: "강한 이슬비",
+    56: "약한 어는비",
+    57: "강한 어는비",
+    61: "약한 비",
+    63: "비",
+    65: "강한 비",
+    66: "약한 어는비",
+    67: "강한 어는비",
+    71: "약한 눈",
+    73: "눈",
+    75: "강한 눈",
+    77: "진눈깨비",
+    80: "소나기",
+    81: "강한 소나기",
+    82: "매우 강한 소나기",
+    85: "약한 눈소나기",
+    86: "강한 눈소나기",
+    95: "뇌우",
+    96: "약한 우박 뇌우",
+    99: "강한 우박 뇌우",
+}
+
+
+def _resolve_stadium_coords(stadium_name: str) -> Optional[Dict[str, Any]]:
+    name = str(stadium_name or "").strip()
+    if not name:
+        return None
+    for key, info in STADIUM_REGION_COORDS.items():
+        if key in name:
+            return {"region": info["region"], "lat": info["lat"], "lon": info["lon"]}
+    return None
+
+
+def _weather_icon_key(code: int) -> str:
+    if code in {95, 96, 99}:
+        return "storm"
+    if code in {45, 48}:
+        return "fog"
+    if code in {71, 73, 75, 77, 85, 86}:
+        return "snow"
+    if code in {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82}:
+        return "rain"
+    if code in {1, 2}:
+        return "partly"
+    if code == 3:
+        return "cloud"
+    return "sun"
+
+
+def _parse_game_datetime_kst(target_date: date, game_time: str) -> Optional[datetime]:
+    text = str(game_time or "").strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})$", text)
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2))
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=KST)
+
+
+def _dust_grade(pm10: float) -> str:
+    if pm10 <= 30:
+        return "좋음"
+    if pm10 <= 80:
+        return "보통"
+    if pm10 <= 150:
+        return "나쁨"
+    return "매우 나쁨"
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _build_game_weather_info(target_date: date, game_time: str, stadium_name: str) -> Dict[str, Any]:
+    coords = _resolve_stadium_coords(stadium_name)
+    if not coords:
+        return {}
+
+    now_kst = datetime.now(KST)
+    game_start = _parse_game_datetime_kst(target_date=target_date, game_time=game_time)
+    start_hour_dt = datetime(target_date.year, target_date.month, target_date.day, 0, 0, tzinfo=KST)
+    if target_date == now_kst.date():
+        start_hour_dt = now_kst.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+    end_boundary = datetime(target_date.year, target_date.month, target_date.day, 23, 0, tzinfo=KST)
+    end_midnight = datetime(target_date.year, target_date.month, target_date.day, 0, 0, tzinfo=KST) + timedelta(days=1)
+    include_midnight = target_date == now_kst.date()
+    if start_hour_dt > end_boundary and not include_midnight:
+        return {}
+
+    target_hours: list[datetime] = []
+    cursor = start_hour_dt
+    while cursor <= end_boundary:
+        target_hours.append(cursor)
+        cursor += timedelta(hours=1)
+    if include_midnight and end_midnight not in target_hours:
+        target_hours.append(end_midnight)
+
+    if not target_hours:
+        return {}
+
+    params = {
+        "latitude": coords["lat"],
+        "longitude": coords["lon"],
+        "timezone": "Asia/Seoul",
+        "hourly": "temperature_2m,weather_code,precipitation_probability",
+        "start_date": target_date.isoformat(),
+        "end_date": (target_date + timedelta(days=1)).isoformat() if include_midnight else target_date.isoformat(),
+    }
+    try:
+        weather_resp = _http_get_with_retries(OPENMETEO_FORECAST_URL, params=params, timeout=12)
+        weather_resp.raise_for_status()
+        weather_payload = weather_resp.json()
+    except Exception:
+        return {}
+
+    hourly = weather_payload.get("hourly") or {}
+    times = hourly.get("time") or []
+    weather_codes = hourly.get("weather_code") or []
+    temperatures = hourly.get("temperature_2m") or []
+    rain_probs = hourly.get("precipitation_probability") or []
+    by_time: Dict[str, Dict[str, Any]] = {}
+    for idx, raw_time in enumerate(times):
+        by_time[str(raw_time)] = {
+            "code": int(weather_codes[idx]) if idx < len(weather_codes) and weather_codes[idx] is not None else 0,
+            "temp": temperatures[idx] if idx < len(temperatures) else None,
+            "pop": rain_probs[idx] if idx < len(rain_probs) else None,
+        }
+
+    hourly_items: list[Dict[str, Any]] = []
+    for hour_dt in target_hours:
+        key = hour_dt.strftime("%Y-%m-%dT%H:00")
+        entry = by_time.get(key)
+        if not entry:
+            continue
+        code = int(entry.get("code", 0) or 0)
+        pop = int(entry.get("pop", 0) or 0)
+        is_midnight = hour_dt.hour == 0 and hour_dt.date() > target_date
+        label = "24:00" if is_midnight else hour_dt.strftime("%H:00")
+        game_start_label = game_start.strftime("%H:%M") if game_start else ""
+        is_game_start = bool(game_start_label) and game_start_label.startswith(label[:2] + ":")
+        hourly_items.append(
+            {
+                "time_label": label,
+                "weather": WEATHER_CODE_TEXT.get(code, "날씨"),
+                "icon": _weather_icon_key(code),
+                "rain_probability": pop,
+                "temperature": (
+                    f"{float(entry['temp']):.1f}"
+                    if entry.get("temp") is not None and entry.get("temp") != ""
+                    else "-"
+                ),
+                "is_game_start": is_game_start,
+            }
+        )
+
+    if not hourly_items:
+        return {}
+
+    if game_start:
+        game_window_pops = []
+        for offset in range(-1, 5):
+            slot = (game_start.replace(minute=0, second=0, microsecond=0) + timedelta(hours=offset)).strftime("%H:00")
+            if slot == "00:00":
+                slot = "24:00"
+            for item in hourly_items:
+                if item["time_label"] == slot:
+                    game_window_pops.append(item["rain_probability"])
+        if not game_window_pops:
+            game_window_pops = [item["rain_probability"] for item in hourly_items]
+    else:
+        game_window_pops = [item["rain_probability"] for item in hourly_items]
+
+    avg_pop = sum(game_window_pops) / max(1, len(game_window_pops))
+    max_pop = max(game_window_pops) if game_window_pops else 0
+    progress_probability = int(round(max(0, min(100, 100 - (avg_pop * 0.6 + max_pop * 0.4)))))
+
+    aq_params = {
+        "latitude": coords["lat"],
+        "longitude": coords["lon"],
+        "timezone": "Asia/Seoul",
+        "hourly": "pm10,pm2_5",
+        "start_date": now_kst.date().isoformat(),
+        "end_date": now_kst.date().isoformat(),
+    }
+    dust = {"pm10": "-", "pm2_5": "-", "grade": "-"}
+    try:
+        aq_resp = _http_get_with_retries(OPENMETEO_AIR_QUALITY_URL, params=aq_params, timeout=12)
+        aq_resp.raise_for_status()
+        aq_payload = aq_resp.json()
+        aq_hourly = aq_payload.get("hourly") or {}
+        aq_times = aq_hourly.get("time") or []
+        pm10_values = aq_hourly.get("pm10") or []
+        pm25_values = aq_hourly.get("pm2_5") or []
+        now_hour_key = now_kst.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:00")
+        pick_idx = aq_times.index(now_hour_key) if now_hour_key in aq_times else (len(aq_times) - 1)
+        if pick_idx >= 0:
+            pm10 = _safe_float(pm10_values[pick_idx] if pick_idx < len(pm10_values) else None)
+            pm25 = _safe_float(pm25_values[pick_idx] if pick_idx < len(pm25_values) else None)
+            if pm10 is not None:
+                dust["pm10"] = f"{pm10:.0f}"
+                dust["grade"] = _dust_grade(pm10)
+            if pm25 is not None:
+                dust["pm2_5"] = f"{pm25:.0f}"
+    except Exception:
+        pass
+
+    return {
+        "region": coords["region"],
+        "game_start_time": str(game_time or "").strip(),
+        "hourly": hourly_items,
+        "game_progress_probability": progress_probability,
+        "dust": dust,
+        "updated_at": now_kst.replace(microsecond=0).isoformat(),
+    }
 
 
 def _fetch_games(target_date: date) -> list[Dict[str, Any]]:
@@ -1703,6 +1953,11 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 game_id=game_id,
                 sr_id=sr_id,
             )
+            weather_info = _build_game_weather_info(
+                target_date=target,
+                game_time=str(game.get("G_TM", "") or ""),
+                stadium_name=str(game.get("S_NM", "") or ""),
+            )
 
             return {
                 "season_id": season_id,
@@ -1739,6 +1994,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "current_series": series_info.get("current_series"),
                 "next_series": series_info.get("next_series"),
                 "lineup_info": lineup_info,
+                "weather_info": weather_info,
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,
             }

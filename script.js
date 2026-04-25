@@ -51,6 +51,53 @@ const renderLiveHeader = (g) => {
   `;
 };
 
+const WEATHER_ICON_MAP = {
+  sun: "☀️",
+  partly: "⛅",
+  cloud: "☁️",
+  rain: "🌧️",
+  snow: "❄️",
+  fog: "🌫️",
+  storm: "⛈️",
+};
+
+const renderWeatherSection = (g) => {
+  const weather = g?.weather_info;
+  if (!weather || !Array.isArray(weather.hourly) || weather.hourly.length === 0) return "";
+
+  const hourlyItems = weather.hourly.map((item) => `
+      <article class="weather-hour-item">
+        <div class="weather-time-row">
+          <span class="weather-time">${item.time_label || "-"}</span>
+          ${item.is_game_start ? `<span class="weather-game-start">경기시작</span>` : ""}
+        </div>
+        <div class="weather-icon">${WEATHER_ICON_MAP[item.icon] || "🌤️"}</div>
+        <div class="weather-desc">${item.weather || "-"}</div>
+        <div class="weather-pop">강수 ${item.rain_probability ?? "-"}%</div>
+        <div class="weather-temp">${item.temperature && item.temperature !== "-" ? `${item.temperature}°C` : "-"}</div>
+      </article>
+    `).join("");
+
+  return `
+    <section class="weather-section">
+      <h2 class="cmp-title">경기장 날씨</h2>
+      <div class="weather-summary">
+        <div class="weather-summary-item">지역: ${weather.region || "-"}</div>
+        <div class="weather-summary-item">경기 진행 확률: <strong>${weather.game_progress_probability ?? "-"}%</strong></div>
+        <div class="weather-summary-item">
+          미세먼지(PM10): ${weather?.dust?.pm10 || "-"}㎍/m3 (${weather?.dust?.grade || "-"})
+        </div>
+        <div class="weather-summary-item">초미세먼지(PM2.5): ${weather?.dust?.pm2_5 || "-"}㎍/m3</div>
+      </div>
+      <div class="weather-hourly-wrap">
+        <div class="weather-hourly-grid">
+          ${hourlyItems}
+        </div>
+      </div>
+    </section>
+  `;
+};
+
 const renderTeamComparison = (tc, awayName, homeName, headToHead) => {
     if (!tc || !tc.away || !tc.home) return "";
 
@@ -466,6 +513,7 @@ const renderGame = (g, refreshedAt) => {
         ${renderPitcherCard("홈팀 선발", g.home_starter, g.home_starter_image, g.home_starter_stats)}
       </div>
     </div>
+    ${renderWeatherSection(g)}
     ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary)}
     ${renderLineupSection(g)}
     ${renderSeriesSection(g)}
