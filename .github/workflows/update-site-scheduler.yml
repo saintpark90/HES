@@ -1,9 +1,12 @@
 name: Update HES Pages Data
 
+# GitHub's `schedule` cron is NOT guaranteed every 5 minutes (often 30–90+ min apart under load).
+# After each successful run we dispatch the same workflow again after sleeping until the next 5-minute
+# boundary so the site actually refreshes ~every 5 minutes. `schedule` remains as a backup bootstrap.
+
 on:
   workflow_dispatch:
   schedule:
-    # Every 5 minutes (GitHub Actions minimum) — no UTC/KST gating; site data refreshes 24/7.
     - cron: "*/5 * * * *"
   push:
     branches:
@@ -11,17 +14,29 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: update-hes-pages-${{ github.ref }}
+  # Must not cancel in-progress: the "queue next run" step sleeps ~5m; cancelling would break the chain.
   cancel-in-progress: false
 
 jobs:
   build-site:
+    # Avoid re-running on bot data-only commits (prevents overlapping chains with push + dispatch).
+    if: |
+      github.event_name != 'push' ||
+      github.event.head_commit == null ||
+      !contains(github.event.head_commit.message, '[skip site ci]')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Sync with remote (reduce push races)
+        run: git pull --rebase origin ${{ github.ref_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,11 +52,42 @@ jobs:
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add index.html thumbnail.png game-data.json
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: refresh next Hanwha game preview"
-            git push
+            git commit -m "chore: refresh next Hanwha game preview [skip site ci]"
+            git push origin ${{ github.ref_name }}
           fi
+
+      - name: Queue next run (~5 minute cadence)
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import time
+          from datetime import datetime, timezone
+
+          now = datetime.now(timezone.utc)
+          minute = now.minute
+          sec = ((5 - (minute % 5)) * 60 - now.second) % 300
+          if sec < 45:
+              sec += 300
+          print(f"Sleeping {sec}s, then dispatching next workflow run")
+          time.sleep(sec)
+          subprocess.run(
+              [
+                  "gh",
+                  "workflow",
+                  "run",
+                  "update-site-scheduler.yml",
+                  "--ref",
+                  os.environ["GITHUB_REF_NAME"],
+              ],
+              check=True,
+          )
+          PY
