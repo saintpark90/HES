@@ -110,7 +110,7 @@ h1 {
   min-width: 0;
 }
 
-.pitcher-card img {
+.pitcher-card .pitcher-card-img {
   width: 100%;
   aspect-ratio: 3 / 4;
   object-fit: cover;
@@ -118,6 +118,16 @@ h1 {
   display: block;
   background: #f0f0f0;
   image-rendering: auto;
+}
+
+/* 선발 미정: 팀 엠블럼을 카드 안에서 반투명·여백 있게 */
+.pitcher-card--emblem-pending .pitcher-card-img--emblem {
+  object-fit: contain;
+  object-position: center;
+  padding: clamp(16px, 18%, 48px) clamp(12px, 14%, 40px);
+  opacity: 0.45;
+  background: linear-gradient(160deg, #f6f6f6 0%, #ececec 100%);
+  box-sizing: border-box;
 }
 
 .pitcher-body {

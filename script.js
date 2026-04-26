@@ -7,9 +7,20 @@ let lastWindowProbeDate = "";
 
 if (!container) throw new Error("game-content container not found");
 
-const renderPitcherCard = (teamLabel, name, image, stats) => `
-    <article class="pitcher-card">
-      <img src="${image || "./thumbnail.png"}" alt="${name} 선수 사진" loading="lazy" />
+const isStarterUndecided = (name) => {
+  const t = String(name || "").trim();
+  return !t || t === "-" || t === "미정" || t === "TBD" || t === "예정";
+};
+
+const renderPitcherCard = (teamLabel, name, image, stats, emblemUrl) => {
+  const useEmblem = isStarterUndecided(name) && Boolean(emblemUrl);
+  const imgSrc = useEmblem ? emblemUrl : image || "./thumbnail.png";
+  const imgAlt = useEmblem ? `${teamLabel} 팀 엠블럼` : `${name} 선수 사진`;
+  const cardMod = useEmblem ? " pitcher-card--emblem-pending" : "";
+  const imgMod = useEmblem ? " pitcher-card-img--emblem" : "";
+  return `
+    <article class="pitcher-card${cardMod}">
+      <img src="${imgSrc}" alt="${imgAlt}" class="pitcher-card-img${imgMod}" loading="lazy" />
       <div class="pitcher-body">
         <h3>${teamLabel}: ${name}</h3>
         <div class="starter-record">시즌 승/패: ${stats?.wins || "-"}승 ${stats?.losses || "-"}패</div>
@@ -24,6 +35,7 @@ const renderPitcherCard = (teamLabel, name, image, stats) => `
       </div>
     </article>
   `;
+};
 
 const renderLiveHeader = (g) => {
   const live = g?.live_status;
@@ -552,8 +564,20 @@ const renderGame = (g, refreshedAt) => {
     <div class="row"><span class="label">한화 선발투수:</span>${g.hanwha_starter}</div>
     <div class="sub">
       <div class="pitcher-grid">
-        ${renderPitcherCard("원정팀 선발", g.away_starter, g.away_starter_image, g.away_starter_stats)}
-        ${renderPitcherCard("홈팀 선발", g.home_starter, g.home_starter_image, g.home_starter_stats)}
+        ${renderPitcherCard(
+          "원정팀 선발",
+          g.away_starter,
+          g.away_starter_image,
+          g.away_starter_stats,
+          g.team_comparison?.away_emblem,
+        )}
+        ${renderPitcherCard(
+          "홈팀 선발",
+          g.home_starter,
+          g.home_starter_image,
+          g.home_starter_stats,
+          g.team_comparison?.home_emblem,
+        )}
       </div>
     </div>
     ${renderWeatherSection(g)}
