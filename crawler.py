@@ -515,9 +515,28 @@ def _fetch_latest_playlist_video(playlist_id: str) -> Dict[str, str]:
         "yt": "http://www.youtube.com/xml/schemas/2015",
         "media": "http://search.yahoo.com/mrss/",
     }
-    entry = root.find("atom:entry", ns)
-    if entry is None:
+    entries = root.findall("atom:entry", ns)
+    if not entries:
         return _fetch_latest_playlist_video_from_page(playlist_id)
+
+    # Reorder in RSS does not always match "most recently published" on YouTube. Pick max(atom:published).
+    entry: Optional[ET.Element] = None
+    best_published: Optional[datetime] = None
+    for cand in entries:
+        raw = (cand.findtext("atom:published", default="", namespaces=ns) or "").strip()
+        if not raw:
+            continue
+        if raw.endswith("Z"):
+            raw = raw.replace("Z", "+00:00")
+        try:
+            published_at = datetime.fromisoformat(raw)
+        except Exception:
+            continue
+        if best_published is None or published_at > best_published:
+            best_published = published_at
+            entry = cand
+    if entry is None:
+        entry = entries[0]
 
     title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
     link_node = entry.find("atom:link", ns)
@@ -693,10 +712,14 @@ def _http_get_with_retries(
 
 
 def _fetch_eagles_tv_latest() -> Dict[str, Any]:
-    return {
-        "highlight": _fetch_latest_playlist_video(EAGLES_HIGHLIGHT_PLAYLIST_ID),
-        "oiyu": _fetch_latest_playlist_video(EAGLES_OIYU_PLAYLIST_ID),
-    }
+    # Fetch in sequence. Back-to-back YouTube requests on CI can occasionally return empty; retry oiyu once.
+    highlight = _fetch_latest_playlist_video(EAGLES_HIGHLIGHT_PLAYLIST_ID)
+    time.sleep(0.5)
+    oiyu = _fetch_latest_playlist_video(EAGLES_OIYU_PLAYLIST_ID)
+    if not (oiyu or {}).get("url"):
+        time.sleep(1.0)
+        oiyu = _fetch_latest_playlist_video(EAGLES_OIYU_PLAYLIST_ID)
+    return {"highlight": highlight, "oiyu": oiyu}
 
 
 def _build_naver_article_url(oid: str, aid: str) -> str:
