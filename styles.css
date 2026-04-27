@@ -630,6 +630,13 @@ h1 {
   color: #666;
 }
 
+.sched-cancel {
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #666;
+}
+
 .sched-score {
   display: flex;
   align-items: center;
@@ -655,6 +662,10 @@ h1 {
 
 .sched-result-live {
   color: #cc0015;
+}
+
+.sched-result-cancel {
+  color: #666;
 }
 
 .sched-legend {
@@ -730,7 +741,8 @@ h1 {
 
   .sched-time,
   .sched-score,
-  .sched-no-game {
+  .sched-no-game,
+  .sched-cancel {
     font-size: 12px;
   }
 
@@ -992,7 +1004,8 @@ h1 {
 
   .sched-time,
   .sched-score,
-  .sched-no-game {
+  .sched-no-game,
+  .sched-cancel {
     margin-top: 26px;
   }
 

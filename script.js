@@ -361,7 +361,13 @@ const renderSeriesSection = (g) => {
       ? `${row?.hanwha_score || "-"}:${row?.opponent_score || "-"}`
       : "";
     const result = row?.result || "";
-    const resultClass = result === "승" ? "sched-result-win" : result === "패" ? "sched-result-loss" : "sched-result-draw";
+    const resultClass = result === "승"
+      ? "sched-result-win"
+      : result === "패"
+        ? "sched-result-loss"
+        : result === "취소"
+          ? "sched-result-cancel"
+          : "sched-result-draw";
     const gameMeta = row
       ? `
         <div class="sched-opponent-wrap">
@@ -373,7 +379,11 @@ const renderSeriesSection = (g) => {
         </div>
         ${
           row?.is_final
-            ? `<div class="sched-score"><span>${score}</span><strong class="${resultClass}">${result || "-"}</strong></div>`
+            ? (
+              result === "취소"
+                ? `<div class="sched-cancel">취소</div>`
+                : `<div class="sched-score"><span>${score}</span><strong class="${resultClass}">${result || "-"}</strong></div>`
+            )
             : row?.is_live
               ? `<div class="sched-score"><span>${score || "진행중"}</span><strong class="sched-result-live">LIVE</strong></div>`
               : `<div class="sched-time">${timeText || "-"}</div>`

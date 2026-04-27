@@ -2172,6 +2172,10 @@ def _resolve_hanwha_series(target_date: date, target_opponent: str, max_days_ahe
 
 
 def _hanwha_game_result(game: Dict[str, Any]) -> str:
+    cancel_id = str(game.get("CANCEL_SC_ID", "") or "").strip()
+    cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
+    if (cancel_id and cancel_id not in {"0"}) or ("취소" in cancel_name):
+        return "취소"
     if not _is_final_game(game):
         return ""
     try:
