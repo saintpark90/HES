@@ -976,6 +976,20 @@ h1 {
 }
 
 @media (max-width: 640px) {
+  .sched-opponent-wrap {
+    top: 18px;
+    right: 4px;
+  }
+
+  .sched-day-num {
+    padding-right: 28px;
+  }
+
+  .sched-opponent-emblem {
+    width: 28px;
+    height: 28px;
+  }
+
   .sched-head {
     grid-template-columns: 32px 1fr 32px;
     gap: 6px;
