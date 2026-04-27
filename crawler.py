@@ -34,9 +34,13 @@ EAGLES_HIGHLIGHT_PLAYLIST_ID = "PLH13Vc2FtHHh-syagRtonzJLl-SkG3B7Q"
 EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
 NAVER_SPORTS_NEWS_API_URL = "https://api-gw.sports.naver.com/news/articles/kbaseball"
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list={playlist_id}"
+# Official channel; used when the 오이유 video is not in the configured playlist (same-day by title suffix as H/L).
+EAGLES_OFFICIAL_VIDEOS_URL = "https://www.youtube.com/@HanwhaEagles_official/videos"
 OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPENMETEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 KST = ZoneInfo("Asia/Seoul")
+_HANWHA_SEASON_SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
+_HANWHA_SEASON_SCHEDULE_CACHE_TTL_SEC = 60 * 30
 
 
 def _today_kst() -> date:
@@ -711,6 +715,207 @@ def _http_get_with_retries(
     raise RuntimeError("unreachable retry state")
 
 
+_TITLE_DATE_PAREN = re.compile(r"(\([0-9]{1,2}\.[0-9]{1,2}\))\s*$")
+
+
+def _trailing_date_paren_from_title(title: str) -> str:
+    t = (title or "").strip()
+    m = _TITLE_DATE_PAREN.search(t)
+    return m.group(1) if m else ""
+
+
+def _is_regular_season_hl_row_title(title: str) -> bool:
+    """True for typical [정규시즌 H/L] highlight rows; 오이유 pick should skip these."""
+    t = (title or "")
+    return "H/L" in t and ("정규시즌" in t or "[정규" in t or "H/L]" in t)
+
+
+def _yt_renderer_title_text(data: Any) -> str:
+    if not isinstance(data, dict):
+        return str(data or "")
+    t = (data.get("title") or {})
+    if not isinstance(t, dict):
+        return str(t or "")
+    runs = t.get("runs", [])
+    if runs and isinstance(runs, list):
+        return "".join((str((x or {}).get("text", "")) for x in runs if isinstance(x, dict)))
+    return str(t.get("simpleText", "") or "")
+
+
+def _oiyu_browse_rich_grid_to_video_list(rg: Dict[str, Any]) -> list[Dict[str, str]]:
+    out: list[Dict[str, str]] = []
+    for item in (rg.get("contents") or []):
+        if not isinstance(item, dict):
+            continue
+        ritem = item.get("richItemRenderer", {}) or item
+        if not isinstance(ritem, dict):
+            continue
+        content = ritem.get("content")
+        if not isinstance(content, dict):
+            content = ritem
+        vrend = (content or {}).get("videoRenderer")
+        if not isinstance(vrend, dict) or not vrend.get("videoId"):
+            continue
+        video_id = str(vrend.get("videoId", "") or "").strip()
+        title = _yt_renderer_title_text(vrend)
+        pub = vrend.get("publishedTimeText", {})
+        published = ""
+        if isinstance(pub, dict):
+            published = str(pub.get("simpleText", "") or "").strip()
+        out.append(
+            {
+                "video_id": video_id,
+                "title": title,
+                "published_at": published,
+            }
+        )
+    return out
+
+
+def _browse_data_to_oiyu_videos_list(init_data: Any) -> list[Dict[str, str]]:
+    two = (init_data or {}).get("contents", {}).get("twoColumnBrowseResultsRenderer", {}) or {}
+    tabs = two.get("tabs") or []
+    # Prefer the main long-form "동영상" / "Videos" tab (not Home/Shorts).
+    preferred: list[Dict[str, str]] = []
+    fallback: list[Dict[str, str]] = []
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        tr = tab.get("tabRenderer") or {}
+        if not isinstance(tr, dict):
+            continue
+        ttitle = tr.get("title", {})
+        tab_name = _yt_simple_text_from_title_obj(ttitle)
+        c = tr.get("content")
+        if not isinstance(c, dict):
+            continue
+        rg = c.get("richGridRenderer")
+        if not isinstance(rg, dict) or not (rg.get("contents") or []):
+            continue
+        parsed = _oiyu_browse_rich_grid_to_video_list(rg)
+        if not parsed:
+            continue
+        if tab_name in ("동영상", "Videos", "비디오"):
+            preferred = parsed
+            break
+        if len(parsed) > len(fallback):
+            fallback = parsed
+    return preferred or fallback
+
+
+def _yt_simple_text_from_title_obj(ttitle: Any) -> str:
+    if not isinstance(ttitle, dict):
+        return str(ttitle or "").strip()
+    s = (ttitle.get("simpleText") or "").strip()
+    if s:
+        return s
+    runs = ttitle.get("runs") or []
+    if runs and isinstance(runs, list):
+        return "".join((str((x or {}).get("text", "")) for x in runs if isinstance(x, dict)))
+    return ""
+
+
+def _fetch_eagles_official_videos_browse() -> list[Dict[str, str]]:
+    """Channel /videos, newest first (Korean /videos '동영상' tab)."""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = _http_get_with_retries(EAGLES_OFFICIAL_VIDEOS_URL, headers=headers, timeout=14)
+        response.raise_for_status()
+        html = response.text
+    except Exception:
+        return []
+    m = re.search(r"var ytInitialData = (\{.*?\});</script>", html, re.S)
+    if not m:
+        return []
+    try:
+        init_data = json.loads(m.group(1))
+    except Exception:
+        return []
+    return _browse_data_to_oiyu_videos_list(init_data)
+
+
+def _tv_entry_from_video_id_title(
+    video_id: str, title: str, published: str = ""
+) -> Dict[str, str]:
+    title = (title or "").strip()
+    if not video_id:
+        return {
+            "title": "",
+            "url": "",
+            "published_at": "",
+            "video_id": "",
+            "thumbnail": "",
+        }
+    title = _fetch_youtube_video_title_ko(video_id, title)
+    return {
+        "title": title,
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+        "published_at": published or "",
+        "video_id": video_id,
+        "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+    }
+
+
+def _oiyu_from_channel_matched_to_highlight(
+    channel_videos: list[Dict[str, str]], highlight: Dict[str, str]
+) -> Dict[str, str]:
+    """
+    Newest-first /videos: 오이유는 H/L **이후**(업로드 시각 기준)에만 올라오므로, H/L보다
+    위에 있는 항목만 본다 (인덱스 0..idx-1). 그중 H/L **바로 다음**에 올라온 것(연속일 가능성)을
+    우선하려고 idx-1 → idx-2 → … → 0 순으로 스캔한다.
+    """
+    h_id = str((highlight or {}).get("video_id", "") or "").strip()
+    h_title = (highlight or {}).get("title", "") or ""
+    date_suffix = _trailing_date_paren_from_title(h_title)
+    if not date_suffix or not h_id:
+        return {}
+
+    def matches_game_day(v: Dict[str, str]) -> bool:
+        t = (v.get("title") or "").strip()
+        if not t.rstrip().endswith(date_suffix):
+            return False
+        if _is_regular_season_hl_row_title(t):
+            return False
+        vid = str((v.get("video_id") or "")).strip()
+        if vid == h_id:
+            return False
+        return True
+
+    if not channel_videos:
+        return {}
+
+    idx = -1
+    for i, v in enumerate(channel_videos):
+        if str((v.get("video_id") or "")).strip() == h_id:
+            idx = i
+            break
+    if idx < 0:
+        return {}
+    for j in range(idx - 1, -1, -1):
+        v = channel_videos[j]
+        if matches_game_day(v):
+            return _tv_entry_from_video_id_title(
+                v["video_id"],
+                v.get("title", "") or "",
+                v.get("published_at", "") or "",
+            )
+    return {}
+
+
+def _oiyu_needs_channel_fallback(
+    highlight: Dict[str, str], oiyu: Dict[str, str]
+) -> bool:
+    if not (highlight or {}).get("url"):
+        return False
+    h_date = _trailing_date_paren_from_title((highlight or {}).get("title", "") or "")
+    if not h_date:
+        return False
+    if not (oiyu or {}).get("url"):
+        return True
+    o_date = _trailing_date_paren_from_title((oiyu or {}).get("title", "") or "")
+    return o_date != h_date
+
+
 def _fetch_eagles_tv_latest() -> Dict[str, Any]:
     # Fetch in sequence. Back-to-back YouTube requests on CI can occasionally return empty; retry oiyu once.
     highlight = _fetch_latest_playlist_video(EAGLES_HIGHLIGHT_PLAYLIST_ID)
@@ -719,6 +924,15 @@ def _fetch_eagles_tv_latest() -> Dict[str, Any]:
     if not (oiyu or {}).get("url"):
         time.sleep(1.0)
         oiyu = _fetch_latest_playlist_video(EAGLES_OIYU_PLAYLIST_ID)
+
+    if _oiyu_needs_channel_fallback(highlight, oiyu):
+        time.sleep(0.4)
+        browse = _fetch_eagles_official_videos_browse()
+        if browse:
+            picked = _oiyu_from_channel_matched_to_highlight(browse, highlight)
+            if (picked or {}).get("url"):
+                oiyu = picked
+
     return {"highlight": highlight, "oiyu": oiyu}
 
 
@@ -1957,6 +2171,90 @@ def _resolve_hanwha_series(target_date: date, target_opponent: str, max_days_ahe
     return {"current_series": current_series, "next_series": next_series}
 
 
+def _hanwha_game_result(game: Dict[str, Any]) -> str:
+    if not _is_final_game(game):
+        return ""
+    try:
+        away = int(str(game.get("T_SCORE_CN", "0") or "0"))
+        home = int(str(game.get("B_SCORE_CN", "0") or "0"))
+    except Exception:
+        return ""
+    if away == home:
+        return "무"
+    hanwha_score = away if game.get("AWAY_ID") == HANWHA_TEAM_ID else home
+    opp_score = home if game.get("AWAY_ID") == HANWHA_TEAM_ID else away
+    return "승" if hanwha_score > opp_score else "패"
+
+
+def _serialize_hanwha_schedule_game(game: Dict[str, Any], target_date: date) -> Dict[str, Any]:
+    is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
+    away_team = str(game.get("AWAY_NM", "") or "").strip()
+    home_team = str(game.get("HOME_NM", "") or "").strip()
+    opponent_name = home_team if is_away else away_team
+    away_score = str(game.get("T_SCORE_CN", "") or "").strip()
+    home_score = str(game.get("B_SCORE_CN", "") or "").strip()
+    hanwha_score = away_score if is_away else home_score
+    opponent_score = home_score if is_away else away_score
+    state = str(game.get("GAME_STATE_SC", "") or "").strip()
+    return {
+        "date": target_date.isoformat(),
+        "game_id": str(game.get("G_ID", "") or "").strip(),
+        "game_time": str(game.get("G_TM", "") or "").strip(),
+        "stadium": str(game.get("S_NM", "") or "").strip(),
+        "home_away": "원정" if is_away else "홈",
+        "opponent": opponent_name,
+        "opponent_team_id": str(game.get("HOME_ID") if is_away else game.get("AWAY_ID") or "").strip(),
+        "away_team": away_team,
+        "home_team": home_team,
+        "away_score": away_score,
+        "home_score": home_score,
+        "hanwha_score": hanwha_score,
+        "opponent_score": opponent_score,
+        "is_live": state == "2",
+        "is_final": state in {"3", "4"},
+        "result": _hanwha_game_result(game),
+    }
+
+
+def _collect_hanwha_season_schedule(
+    season_id: str, *, include_november: bool = True
+) -> list[Dict[str, Any]]:
+    try:
+        season_year = int(str(season_id or "").strip())
+    except Exception:
+        season_year = _today_kst().year
+    start_date = date(season_year, 3, 1)
+    end_date = date(season_year, 11 if include_november else 10, 30)
+    items: list[Dict[str, Any]] = []
+    cursor = start_date
+    while cursor <= end_date:
+        try:
+            games = _fetch_games(cursor)
+        except Exception:
+            cursor += timedelta(days=1)
+            continue
+        for game in games:
+            if _is_hanwha_game(game):
+                items.append(_serialize_hanwha_schedule_game(game, cursor))
+        cursor += timedelta(days=1)
+    items.sort(key=lambda x: x.get("date", ""))
+    return items
+
+
+def _get_hanwha_season_schedule_cached(season_id: str) -> list[Dict[str, Any]]:
+    key = str(season_id or _today_kst().year)
+    now_ts = time.time()
+    cached = _HANWHA_SEASON_SCHEDULE_CACHE.get(key) or {}
+    cached_at = float(cached.get("cached_at", 0.0) or 0.0)
+    if cached and (now_ts - cached_at) <= _HANWHA_SEASON_SCHEDULE_CACHE_TTL_SEC:
+        data = cached.get("data")
+        if isinstance(data, list):
+            return data
+    data = _collect_hanwha_season_schedule(key, include_november=True)
+    _HANWHA_SEASON_SCHEDULE_CACHE[key] = {"cached_at": now_ts, "data": data}
+    return data
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
@@ -2070,6 +2368,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 game_time=str(game.get("G_TM", "") or ""),
                 stadium_name=str(game.get("S_NM", "") or ""),
             )
+            season_schedule = _get_hanwha_season_schedule_cached(season_id)
 
             return {
                 "season_id": season_id,
@@ -2109,5 +2408,6 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "weather_info": weather_info,
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,
+                "season_schedule": season_schedule,
             }
     return None

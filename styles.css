@@ -96,6 +96,8 @@ h1 {
   color: #333;
 }
 
+/* 경기 메타 + 선발 카드: .game-meta-pitcher-layout — PC에서 한 줄(주석: 아래 @media) */
+
 .pitcher-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -168,6 +170,64 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Desktop: 메타(왼) + 선발 카드(오른쪽) 1행, 카드/텍스트 비율 조정 */
+@media (min-width: 768px) {
+  .game-meta-pitcher-layout {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .game-meta-cols {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .game-meta-cols .row {
+    margin: 4px 0;
+  }
+
+  .game-pitcher-cols.sub {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+    border-left: 1px solid #eee;
+    padding-left: 16px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .game-pitcher-cols .pitcher-grid {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .pitcher-card--emblem-pending .pitcher-card-img--emblem {
+    padding: clamp(8px, 10%, 24px) clamp(6px, 8%, 20px);
+  }
+
+  .pitcher-body {
+    padding: 6px 8px 8px;
+  }
+
+  .pitcher-body h3 {
+    font-size: 12px;
+    margin: 0 0 5px;
+  }
+
+  .starter-record {
+    font-size: 11px;
+    margin: 0 0 5px;
+  }
+
+  .stats-grid {
+    font-size: 11px;
+    row-gap: 3px;
+    column-gap: 5px;
+  }
+}
+
 .weather-summary {
   display: flex;
   flex-direction: column;
@@ -215,6 +275,19 @@ h1 {
   background: #fff;
   text-align: center;
   flex: 0 0 74px;
+}
+
+.weather-hour-item.weather-hour-item-date {
+  background: #fff8f3;
+  border-color: #ffd8bf;
+}
+
+.weather-date-value {
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a64e22;
+  line-height: 1.2;
 }
 
 .weather-hour-item.weather-hour-item-game-start {
@@ -448,80 +521,234 @@ h1 {
   background: #fff4e8;
 }
 
-.series-grid {
+.sched-head {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  grid-template-columns: 36px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.series-card {
-  border: 1px solid #ececec;
-  border-radius: 10px;
-  padding: 10px;
+.sched-nav-btn {
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
   background: #fff;
+  font-size: 13px;
+  height: 32px;
+  cursor: pointer;
 }
 
-.series-card h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  color: #d14000;
+.sched-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
-.series-matchup {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 8px;
+.sched-month-label {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #333;
 }
 
-.series-team {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+.sched-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
-  min-width: 0;
-  flex: 1;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: #777;
+  text-align: center;
 }
 
-.series-emblem {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+.sched-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
 }
 
-.series-team-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.2;
-  min-width: 0;
+.sched-day {
+  min-height: 108px;
+  border: 1px solid #ededed;
+  border-radius: 8px;
+  padding: 5px;
+  background: #fff;
+  position: relative;
 }
 
-.series-team-name {
+.sched-day.sched-day-win {
+  background: #e3edff;
+}
+
+.sched-day.sched-day-loss {
+  background: #ffe3d8;
+}
+
+.sched-day.sched-day-draw {
+  background: #f5f5f5;
+}
+
+.sched-day-empty {
+  background: transparent;
+  border: none;
+}
+
+.sched-day.sched-day-home {
+  border: 2px solid #ff8a3d;
+}
+
+.sched-day-num {
   font-size: 12px;
   font-weight: 700;
+  color: #333;
+  margin-bottom: 4px;
 }
 
-.series-team-rank {
+.sched-opponent-wrap {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: block;
+  line-height: 0;
+}
+
+.sched-opponent-emblem {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.sched-opponent {
+  display: none;
+}
+
+.sched-time,
+.sched-score,
+.sched-no-game {
+  margin-top: 10px;
   font-size: 11px;
   color: #666;
 }
 
-.series-vs {
-  font-size: 12px;
+.sched-score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.sched-score strong {
+  font-size: 11px;
+}
+
+.sched-result-win {
+  color: #1f57bf;
+}
+
+.sched-result-loss {
+  color: #d24a13;
+}
+
+.sched-result-draw {
   color: #777;
+}
+
+.sched-result-live {
+  color: #cc0015;
+}
+
+.sched-legend {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #666;
+  flex-wrap: wrap;
+}
+
+.sched-legend em {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.sched-dot-home-border { background: transparent; border: 2px solid #ff8a3d; box-sizing: border-box; }
+.sched-dot-win { background: #d14000; }
+.sched-dot-loss { background: #2b57b8; }
+
+.sched-summary-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.sched-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.sched-summary-table th,
+.sched-summary-table td {
+  border-top: 1px solid #eee;
+  padding: 7px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.sched-summary-table th {
+  background: #fafafa;
+  color: #666;
+  font-size: 11px;
+}
+
+.sched-summary-table td {
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
+  color: #333;
 }
 
-.series-meta {
-  font-size: 12px;
-  color: #555;
-}
+@media (min-width: 768px) {
+  .sched-month-label {
+    font-size: 17px;
+  }
 
-.series-empty {
-  font-size: 13px;
-  color: #777;
+  .sched-weekdays {
+    font-size: 13px;
+  }
+
+  .sched-day-num {
+    font-size: 14px;
+  }
+
+  .sched-opponent-emblem {
+    width: 38px;
+    height: 38px;
+  }
+
+  .sched-time,
+  .sched-score,
+  .sched-no-game {
+    font-size: 12px;
+  }
+
+  .sched-score strong {
+    font-size: 12px;
+  }
+
+  .sched-legend {
+    font-size: 12px;
+  }
+
+  .sched-summary-table {
+    font-size: 13px;
+  }
+
+  .sched-summary-table th {
+    font-size: 12px;
+  }
 }
 
 .eagles-tv-grid {
@@ -749,6 +976,40 @@ h1 {
 }
 
 @media (max-width: 640px) {
+  .sched-head {
+    grid-template-columns: 32px 1fr 32px;
+    gap: 6px;
+  }
+
+  .sched-nav-btn {
+    height: 30px;
+    font-size: 12px;
+  }
+
+  .sched-month-label {
+    font-size: 14px;
+  }
+
+  .sched-grid,
+  .sched-weekdays {
+    gap: 3px;
+  }
+
+  .sched-day {
+    min-height: 86px;
+    padding: 4px;
+  }
+
+  .sched-opponent {
+    font-size: 11px;
+  }
+
+  .sched-time,
+  .sched-score,
+  .sched-no-game {
+    font-size: 10px;
+  }
+
   .weather-hourly-grid {
     gap: 5px;
   }

@@ -4,6 +4,7 @@ const container = document.getElementById("game-content");
 let pollTimer = null;
 let schedulerTimer = null;
 let lastWindowProbeDate = "";
+let scheduleCalendarMonth = "";
 
 if (!container) throw new Error("game-content container not found");
 
@@ -102,6 +103,28 @@ const renderWeatherSection = (g) => {
   };
   const pm25Meta = getDustGradeMeta(pm25Value, "pm25");
 
+  const weatherDateLabel = (() => {
+    const dt = parseYmdAsLocalDate(g?.game_date_ymd || "");
+    if (dt) {
+      return `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`;
+    }
+    const raw = String(weather?.updated_at || "");
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${parsed.getMonth() + 1}/${parsed.getDate()}(${KOR_WEEKDAYS[parsed.getDay()]})`;
+    }
+    return "날짜";
+  })();
+
+  const dateCard = `
+      <article class="weather-hour-item weather-hour-item-date">
+        <div class="weather-time-row">
+          <span class="weather-time">날짜</span>
+        </div>
+        <div class="weather-date-value">${weatherDateLabel}</div>
+      </article>
+    `;
+
   const hourlyItems = weather.hourly.map((item) => `
       <article class="weather-hour-item${item.is_game_start ? " weather-hour-item-game-start" : ""}">
         <div class="weather-time-row">
@@ -135,6 +158,7 @@ const renderWeatherSection = (g) => {
       </div>
       <div class="weather-hourly-wrap">
         <div class="weather-hourly-grid">
+          ${dateCard}
           ${hourlyItems}
         </div>
       </div>
@@ -262,56 +286,159 @@ const renderTeamRankings = (rankings, rankDate) => {
   };
 
 const renderSeriesSection = (g) => {
-  const currentSeries = g?.current_series;
-  const nextSeries = g?.next_series;
-  if (!currentSeries && !nextSeries) return "";
+  const schedule = Array.isArray(g?.season_schedule) ? g.season_schedule : [];
+  if (schedule.length === 0) return "";
 
-  const findRankByTeamName = (teamName) => {
-    const rankings = Array.isArray(g?.team_rankings) ? g.team_rankings : [];
-    const found = rankings.find((row) => (row?.team_name || "") === teamName);
-    return found?.rank ? `${found.rank}위` : "-";
+  const toMonthFromYmd = (ymd) => {
+    const d = parseYmdAsLocalDate(ymd || "");
+    return d ? formatMonthKey(d) : "";
   };
+  const today = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayKey = today.toISOString().slice(0, 10);
+  const monthKeys = Array.from(new Set(schedule.map((x) => toMonthFromYmd(x?.date)).filter(Boolean))).sort();
+  if (monthKeys.length === 0) return "";
+  const minMonth = monthKeys[0];
+  const maxMonth = monthKeys[monthKeys.length - 1];
 
-  const renderSeriesCard = (title, series) => {
-    if (!series) {
-      return `
-        <article class="series-card">
-          <h3>${title}</h3>
-          <div class="series-empty">-</div>
-        </article>
-      `;
-    }
+  const candidateMonth = scheduleCalendarMonth || toMonthFromYmd(g?.game_date_ymd) || toMonthFromYmd(todayKey);
+  const initialMonth = monthKeys.includes(candidateMonth) ? candidateMonth : maxMonth;
+  scheduleCalendarMonth = initialMonth;
+  const viewMonthDate = parseMonthKey(initialMonth) || parseMonthKey(maxMonth) || new Date(today.getFullYear(), today.getMonth(), 1);
+  const viewYear = viewMonthDate.getFullYear();
+  const viewMonth = viewMonthDate.getMonth();
 
-    const renderTeam = (name, emblem, fallbackAlt) => `
-      <div class="series-team">
-        ${emblem ? `<img src="${emblem}" alt="${fallbackAlt}" class="series-emblem" />` : ""}
-        <div class="series-team-text">
-          <span class="series-team-name">${name || "-"}</span>
-          <span class="series-team-rank">(${findRankByTeamName(name || "-")})</span>
+  const mapByDate = {};
+  for (const item of schedule) {
+    const d = String(item?.date || "");
+    if (!d) continue;
+    if (!Array.isArray(mapByDate[d])) mapByDate[d] = [];
+    mapByDate[d].push(item);
+  }
+  const pickForDate = (ymd) => (mapByDate[ymd] || [])[0] || null;
+  const firstDay = new Date(viewYear, viewMonth, 1);
+  const lastDayNo = new Date(viewYear, viewMonth + 1, 0).getDate();
+  // Monday-first calendar: Mon=0 ... Sun=6
+  const leadingBlanks = (firstDay.getDay() + 6) % 7;
+  const monthLabel = `${viewYear}년 ${viewMonth + 1}월`;
+  const monthGames = schedule.filter((x) => String(x?.date || "").startsWith(`${initialMonth}-`));
+  const totalGames = monthGames.length;
+  const totalWins = monthGames.filter((x) => x?.result === "승").length;
+  const totalLosses = monthGames.filter((x) => x?.result === "패").length;
+  const totalDraws = monthGames.filter((x) => x?.result === "무").length;
+  const totalFinalGames = monthGames.filter((x) => x?.is_final).length;
+  const homeFinalGames = monthGames.filter((x) => x?.home_away === "홈" && x?.is_final);
+  const awayFinalGames = monthGames.filter((x) => x?.home_away === "원정" && x?.is_final);
+  const homeWins = homeFinalGames.filter((x) => x?.result === "승").length;
+  const awayWins = awayFinalGames.filter((x) => x?.result === "승").length;
+  const toRate = (wins, gamesCount) => {
+    if (!gamesCount) return "-";
+    return `${((wins / gamesCount) * 100).toFixed(1)}%`;
+  };
+  const homeWinRate = toRate(homeWins, homeFinalGames.length);
+  const awayWinRate = toRate(awayWins, awayFinalGames.length);
+  const totalWinRate = toRate(totalWins, totalFinalGames);
+
+  const cells = [];
+  for (let i = 0; i < leadingBlanks; i += 1) {
+    cells.push('<div class="sched-day sched-day-empty"></div>');
+  }
+  for (let day = 1; day <= lastDayNo; day += 1) {
+    const ymd = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const row = pickForDate(ymd);
+    const isToday = ymd === todayKey;
+    const classes = ["sched-day"];
+    if (isToday) classes.push("sched-day-today");
+    if (row) classes.push("sched-day-game");
+    const homeAway = row?.home_away || "";
+    if (homeAway === "홈") classes.push("sched-day-home");
+    if (row?.is_final && row?.result === "승") classes.push("sched-day-win");
+    if (row?.is_final && row?.result === "패") classes.push("sched-day-loss");
+    if (row?.is_final && row?.result === "무") classes.push("sched-day-draw");
+    const opp = row?.opponent || "";
+    const timeText = row?.game_time || "";
+    const oppEmblem = getOpponentEmblemUrl(g?.season_id, row?.opponent_team_id);
+    const score = (row?.hanwha_score !== "" || row?.opponent_score !== "")
+      ? `${row?.hanwha_score || "-"}:${row?.opponent_score || "-"}`
+      : "";
+    const result = row?.result || "";
+    const resultClass = result === "승" ? "sched-result-win" : result === "패" ? "sched-result-loss" : "sched-result-draw";
+    const gameMeta = row
+      ? `
+        <div class="sched-opponent-wrap">
+          ${
+            oppEmblem
+              ? `<img src="${oppEmblem}" alt="${opp || "상대팀"} 엠블럼" class="sched-opponent-emblem" loading="lazy" />`
+              : ""
+          }
         </div>
-      </div>
-    `;
-
-    return `
-      <article class="series-card">
-        <h3>${title}</h3>
-        <div class="series-matchup">
-          ${renderTeam("한화", series.hanwha_emblem, "한화")}
-          <span class="series-vs">vs</span>
-          ${renderTeam(series.opponent || "-", series.opponent_emblem, series.opponent || "상대팀")}
-        </div>
-        <div class="series-meta">일정: ${formatSeriesDateRangeWithWeekday(series)}</div>
-        <div class="series-meta">장소: ${series.stadium || "-"} (${series.hanwha_home_away || "-"})</div>
+        ${
+          row?.is_final
+            ? `<div class="sched-score"><span>${score}</span><strong class="${resultClass}">${result || "-"}</strong></div>`
+            : row?.is_live
+              ? `<div class="sched-score"><span>${score || "진행중"}</span><strong class="sched-result-live">LIVE</strong></div>`
+              : `<div class="sched-time">${timeText || "-"}</div>`
+        }
+      `
+      : '<div class="sched-no-game">-</div>';
+    cells.push(`
+      <article class="${classes.join(" ")}">
+        <div class="sched-day-num">${day}</div>
+        ${gameMeta}
       </article>
-    `;
-  };
+    `);
+  }
+
+  const prevMonthDate = new Date(viewYear, viewMonth - 1, 1);
+  const nextMonthDate = new Date(viewYear, viewMonth + 1, 1);
+  const prevKey = formatMonthKey(prevMonthDate);
+  const nextKey = formatMonthKey(nextMonthDate);
+  const canPrev = monthKeys.includes(prevKey);
+  const canNext = monthKeys.includes(nextKey);
 
   return `
     <section class="series-section">
-      <h2 class="cmp-title">한화 시리즈 일정</h2>
-      <div class="series-grid">
-        ${renderSeriesCard("현재 시리즈", currentSeries)}
-        ${renderSeriesCard("다음 시리즈", nextSeries)}
+      <h2 class="cmp-title">한화 월별 일정</h2>
+      <div class="sched-head">
+        <button type="button" class="sched-nav-btn" data-sched-nav="prev" ${canPrev ? "" : "disabled"} aria-label="이전 달">◀</button>
+        <div class="sched-month-label">${monthLabel}</div>
+        <button type="button" class="sched-nav-btn" data-sched-nav="next" ${canNext ? "" : "disabled"} aria-label="다음 달">▶</button>
+      </div>
+      <div class="sched-weekdays">
+        <span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span>
+      </div>
+      <div class="sched-grid">
+        ${cells.join("")}
+      </div>
+      <div class="sched-summary-wrap">
+        <table class="sched-summary-table">
+          <thead>
+            <tr>
+              <th>총 경기</th>
+              <th>승</th>
+              <th>패</th>
+              <th>무</th>
+              <th>총 승률</th>
+              <th>홈 승률</th>
+              <th>원정 승률</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>${totalGames}</td>
+              <td>${totalWins}</td>
+              <td>${totalLosses}</td>
+              <td>${totalDraws}</td>
+              <td>${totalWinRate}</td>
+              <td>${homeWinRate}</td>
+              <td>${awayWinRate}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="sched-legend">
+        <span><em class="sched-dot-home-border"></em>홈경기</span>
+        <span><em class="sched-dot-win"></em>승</span>
+        <span><em class="sched-dot-loss"></em>패</span>
       </div>
     </section>
   `;
@@ -383,6 +510,21 @@ const renderLatestNewsSection = (g) => {
       </div>
     </section>
   `;
+};
+
+const bindScheduleCalendarEvents = () => {
+  const navButtons = Array.from(document.querySelectorAll("[data-sched-nav]"));
+  if (navButtons.length === 0) return;
+  for (const btn of navButtons) {
+    btn.addEventListener("click", () => {
+      const current = parseMonthKey(scheduleCalendarMonth || "");
+      if (!current) return;
+      const dir = btn.getAttribute("data-sched-nav");
+      const next = new Date(current.getFullYear(), current.getMonth() + (dir === "next" ? 1 : -1), 1);
+      scheduleCalendarMonth = formatMonthKey(next);
+      renderGame(game, updatedAt);
+    });
+  }
 };
 
 const renderLineupSection = (g) => {
@@ -546,6 +688,30 @@ const formatGameDateWithWeekday = (gameDateText, gameDateYmd) => {
   return `${gameDateText} (${KOR_WEEKDAYS[dt.getDay()]})`;
 };
 
+const formatMonthKey = (dateObj) => {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+};
+
+const parseMonthKey = (monthKey) => {
+  const m = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const month = Number(m[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+  return new Date(y, month - 1, 1);
+};
+
+const KBO_EMBLEM_BASE_URL = "https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/emblem/regular";
+
+const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
+  const sid = String(seasonId || "").trim();
+  const tid = String(opponentTeamId || "").trim();
+  if (!sid || !tid) return "";
+  return `${KBO_EMBLEM_BASE_URL}/${sid}/emblem_${tid}.png`;
+};
+
 const renderGame = (g, refreshedAt) => {
   if (!g) {
     container.innerHTML = "<p>가까운 일정에서 한화 이글스 경기 정보를 찾지 못했습니다.</p>";
@@ -555,15 +721,18 @@ const renderGame = (g, refreshedAt) => {
   container.innerHTML = `
     <div class="updated-at">마지막 갱신: ${formatUpdatedAt(refreshedAt)}</div>
     ${renderLiveHeader(g)}
-    <div class="row"><span class="label">경기일:</span>${formatGameDateWithWeekday(g.game_date, g.game_date_ymd)}</div>
-    <div class="row"><span class="label">경기시간:</span>${g.game_time}</div>
-    <div class="row"><span class="label">대진:</span>${g.matchup}</div>
-    <div class="row"><span class="label">구장:</span>${g.stadium}</div>
-    <div class="row"><span class="label">한화 홈/원정:</span>${g.hanwha_home_away}</div>
-    <div class="row"><span class="label">상대팀:</span>${g.opponent}</div>
-    <div class="row"><span class="label">한화 선발투수:</span>${g.hanwha_starter}</div>
-    <div class="sub">
-      <div class="pitcher-grid">
+    <div class="game-meta-pitcher-layout">
+      <div class="game-meta-cols">
+        <div class="row"><span class="label">경기일:</span>${formatGameDateWithWeekday(g.game_date, g.game_date_ymd)}</div>
+        <div class="row"><span class="label">경기시간:</span>${g.game_time}</div>
+        <div class="row"><span class="label">대진:</span>${g.matchup}</div>
+        <div class="row"><span class="label">구장:</span>${g.stadium}</div>
+        <div class="row"><span class="label">한화 홈/원정:</span>${g.hanwha_home_away}</div>
+        <div class="row"><span class="label">상대팀:</span>${g.opponent}</div>
+        <div class="row"><span class="label">한화 선발투수:</span>${g.hanwha_starter}</div>
+      </div>
+      <div class="game-pitcher-cols sub">
+        <div class="pitcher-grid">
         ${renderPitcherCard(
           "원정팀 선발",
           g.away_starter,
@@ -578,6 +747,7 @@ const renderGame = (g, refreshedAt) => {
           g.home_starter_stats,
           g.team_comparison?.home_emblem,
         )}
+        </div>
       </div>
     </div>
     ${renderWeatherSection(g)}
@@ -588,6 +758,7 @@ const renderGame = (g, refreshedAt) => {
     ${renderLatestNewsSection(g)}
     ${renderTeamRankings(g.team_rankings, g.team_rank_date)}
   `;
+  bindScheduleCalendarEvents();
 };
 
 const shouldStartPolling = (g) => {
