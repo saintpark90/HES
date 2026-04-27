@@ -977,7 +977,7 @@ h1 {
 
 @media (max-width: 640px) {
   .sched-opponent-wrap {
-    top: 18px;
+    top: 22px;
     right: 4px;
   }
 
@@ -988,6 +988,12 @@ h1 {
   .sched-opponent-emblem {
     width: 28px;
     height: 28px;
+  }
+
+  .sched-time,
+  .sched-score,
+  .sched-no-game {
+    margin-top: 26px;
   }
 
   .sched-head {
