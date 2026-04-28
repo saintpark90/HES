@@ -20,11 +20,15 @@ const renderPitcherCard = (teamLabel, name, image, stats, emblemUrl) => {
   const imgAlt = useEmblem ? `${teamLabel} 팀 엠블럼` : `${name} 선수 사진`;
   const cardMod = useEmblem ? " pitcher-card--emblem-pending" : "";
   const imgMod = useEmblem ? " pitcher-card-img--emblem" : "";
+  const birthDate = stats?.birth_date || "-";
+  const age = stats?.age || "-";
+  const profileText = `${birthDate} / 만 ${age}세`;
   return `
     <article class="pitcher-card${cardMod}">
       <img src="${imgSrc}" alt="${imgAlt}" class="pitcher-card-img${imgMod}" loading="lazy" />
       <div class="pitcher-body">
         <h3>${teamLabel}: ${name}</h3>
+        <div class="starter-profile">${profileText}</div>
         <div class="starter-record">시즌 승/패: ${stats?.wins || "-"}승 ${stats?.losses || "-"}패</div>
         <div class="stats-grid">
           <span>ERA</span><strong>${stats?.era || "-"}</strong>

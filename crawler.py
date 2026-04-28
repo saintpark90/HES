@@ -1779,6 +1779,8 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
             advanced = t
 
     image_url = ""
+    birth_date = ""
+    age_text = "-"
     try:
         soup = BeautifulSoup(html, "html.parser")
         # KBO player detail uses id like:
@@ -1790,8 +1792,22 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
             fallback_img = soup.select_one("img[src*='/KBO_IMAGE/person/middle/']")
             if fallback_img:
                 image_url = (fallback_img.get("src") or "").strip()
+        # Try to extract birth date from profile text (e.g. 1998년 03월 12일).
+        plain_text = soup.get_text(" ", strip=True)
+        birth_match = re.search(r"생년월일[^0-9]*(\d{4})\D+(\d{1,2})\D+(\d{1,2})", plain_text)
+        if birth_match:
+            year = int(birth_match.group(1))
+            month = int(birth_match.group(2))
+            day = int(birth_match.group(3))
+            birth_dt = date(year, month, day)
+            birth_date = birth_dt.isoformat()
+            today_kst = _today_kst()
+            age = today_kst.year - birth_dt.year - ((today_kst.month, today_kst.day) < (birth_dt.month, birth_dt.day))
+            age_text = str(age if age >= 0 else "-")
     except Exception:
         image_url = ""
+        birth_date = ""
+        age_text = "-"
 
     if image_url.startswith("//"):
         image_url = "https:" + image_url
@@ -1808,6 +1824,8 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
         "qs": advanced.get("QS", "-"),
         "whip": advanced.get("WHIP", "-"),
         "image_url": image_url,
+        "birth_date": birth_date,
+        "age": age_text,
     }
 
 
