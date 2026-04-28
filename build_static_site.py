@@ -6,6 +6,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from crawler import get_next_hanwha_game
+from generate_holiday_data import build as build_holiday_data
 
 ROOT = Path(__file__).parent
 TEMPLATE_PATH = ROOT / "index.template.html"
@@ -87,6 +88,7 @@ def _merge_starter_fallbacks(current_info: dict, previous_info: dict) -> dict:
 
 
 def build() -> None:
+    build_holiday_data()
     previous_game_info = _load_previous_game_info()
     game_info = get_next_hanwha_game() or {}
     if game_info:

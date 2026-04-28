@@ -560,6 +560,14 @@ h1 {
   text-align: center;
 }
 
+.sched-weekday-sat {
+  color: #1f57bf;
+}
+
+.sched-weekday-sun {
+  color: #d24a13;
+}
+
 .sched-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -573,6 +581,8 @@ h1 {
   padding: 5px;
   background: #fff;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .sched-day.sched-day-win {
@@ -601,6 +611,30 @@ h1 {
   font-weight: 700;
   color: #333;
   margin-bottom: 4px;
+}
+
+.sched-day-body {
+  display: block;
+}
+
+.sched-day.sched-day-sat .sched-day-num {
+  color: #1f57bf;
+}
+
+.sched-day.sched-day-sun .sched-day-num,
+.sched-day.sched-day-holiday .sched-day-num {
+  color: #d24a13;
+}
+
+.sched-holiday-name {
+  margin-top: auto;
+  padding-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #d24a13;
+  line-height: 1.2;
+  text-align: left;
+  word-break: keep-all;
 }
 
 .sched-opponent-wrap {

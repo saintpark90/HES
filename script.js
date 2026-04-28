@@ -5,6 +5,7 @@ let pollTimer = null;
 let schedulerTimer = null;
 let lastWindowProbeDate = "";
 let scheduleCalendarMonth = "";
+let holidayCalendarData = null;
 
 if (!container) throw new Error("game-content container not found");
 
@@ -346,9 +347,14 @@ const renderSeriesSection = (g) => {
     const ymd = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const row = pickForDate(ymd);
     const isToday = ymd === todayKey;
+    const dayOfWeek = new Date(viewYear, viewMonth, day).getDay();
+    const holidayName = getHolidayName(ymd);
     const classes = ["sched-day"];
     if (isToday) classes.push("sched-day-today");
     if (row) classes.push("sched-day-game");
+    if (dayOfWeek === 6) classes.push("sched-day-sat");
+    if (dayOfWeek === 0) classes.push("sched-day-sun");
+    if (holidayName) classes.push("sched-day-holiday");
     const homeAway = row?.home_away || "";
     if (homeAway === "홈") classes.push("sched-day-home");
     if (row?.is_final && row?.result === "승") classes.push("sched-day-win");
@@ -390,10 +396,12 @@ const renderSeriesSection = (g) => {
         }
       `
       : '<div class="sched-no-game">-</div>';
+    const holidayMeta = holidayName ? `<div class="sched-holiday-name">${holidayName}</div>` : "";
     cells.push(`
       <article class="${classes.join(" ")}">
         <div class="sched-day-num">${day}</div>
-        ${gameMeta}
+        <div class="sched-day-body">${gameMeta}</div>
+        ${holidayMeta}
       </article>
     `);
   }
@@ -414,7 +422,7 @@ const renderSeriesSection = (g) => {
         <button type="button" class="sched-nav-btn" data-sched-nav="next" ${canNext ? "" : "disabled"} aria-label="다음 달">▶</button>
       </div>
       <div class="sched-weekdays">
-        <span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span>
+        <span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span class="sched-weekday-sat">토</span><span class="sched-weekday-sun">일</span>
       </div>
       <div class="sched-grid">
         ${cells.join("")}
@@ -656,6 +664,61 @@ const formatUpdatedAt = (value) => {
 };
 
 const KOR_WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const DEFAULT_HOLIDAY_CALENDAR = {
+  fixed: {
+    "01-01": "신정",
+    "03-01": "삼일절",
+    "05-01": "노동절",
+    "05-05": "어린이날",
+    "06-06": "현충일",
+    "07-17": "제헌절",
+    "08-15": "광복절",
+    "10-03": "개천절",
+    "10-09": "한글날",
+    "12-25": "성탄절",
+  },
+  specific: {
+    "2026-02-16": "설날 연휴",
+    "2026-02-17": "설날",
+    "2026-02-18": "설날 연휴",
+    "2026-03-02": "삼일절 대체공휴일",
+    "2026-05-24": "부처님오신날",
+    "2026-05-25": "부처님오신날 대체공휴일",
+    "2026-08-17": "광복절 대체공휴일",
+    "2026-09-24": "추석 연휴",
+    "2026-09-25": "추석",
+    "2026-09-26": "추석 연휴",
+    "2026-10-05": "개천절 대체공휴일",
+  },
+};
+
+const getHolidayName = (ymd) => {
+  const holidayData = holidayCalendarData || DEFAULT_HOLIDAY_CALENDAR;
+  if (holidayData?.specific?.[ymd]) return holidayData.specific[ymd];
+  return holidayData?.fixed?.[ymd.slice(5)] || "";
+};
+
+const loadHolidayCalendar = async () => {
+  try {
+    const response = await fetch(`./holiday-data.json?t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object") return;
+    holidayCalendarData = {
+      fixed: payload.fixed && typeof payload.fixed === "object"
+        ? payload.fixed
+        : DEFAULT_HOLIDAY_CALENDAR.fixed,
+      specific: payload.specific && typeof payload.specific === "object"
+        ? payload.specific
+        : DEFAULT_HOLIDAY_CALENDAR.specific,
+    };
+    if (game) renderGame(game, updatedAt);
+  } catch (err) {
+    console.debug("holiday calendar load failed", err);
+  }
+};
 
 const parseYmdAsLocalDate = (ymd) => {
   if (!ymd || typeof ymd !== "string") return null;
@@ -854,6 +917,7 @@ const schedulerTick = () => {
 };
 
 renderGame(game, updatedAt);
+void loadHolidayCalendar();
 
 // GitHub Pages 정적 JSON은 GHA가 수 커밋해도, 첫 페인트·라이브창 밖에서는 갱신 fetch가 안 돌아가
 // `마지막 갱신`이 오래된 것처럼 보인다. 로드 시와 5분마다 항상 최신 game-data.json을 받는다.

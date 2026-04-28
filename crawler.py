@@ -35,6 +35,7 @@ EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
 NAVER_SPORTS_NEWS_API_URL = "https://api-gw.sports.naver.com/news/articles/kbaseball"
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list={playlist_id}"
 # Official channel; used when the 오이유 video is not in the configured playlist (same-day by title suffix as H/L).
+EAGLES_OFFICIAL_CHANNEL_URL = "https://www.youtube.com/@HanwhaEagles_official"
 EAGLES_OFFICIAL_VIDEOS_URL = "https://www.youtube.com/@HanwhaEagles_official/videos"
 OPENMETEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 OPENMETEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
@@ -834,6 +835,58 @@ def _fetch_eagles_official_videos_browse() -> list[Dict[str, str]]:
     return _browse_data_to_oiyu_videos_list(init_data)
 
 
+def _resolve_channel_id_from_handle_page(channel_url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = _http_get_with_retries(channel_url, headers=headers, timeout=12)
+        response.raise_for_status()
+        html = response.text
+    except Exception:
+        return ""
+
+    m = re.search(r'"channelId":"(UC[a-zA-Z0-9_-]{20,})"', html)
+    if m:
+        return m.group(1)
+    m = re.search(r'href="https://www\.youtube\.com/channel/(UC[a-zA-Z0-9_-]{20,})"', html)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _fetch_channel_videos_from_rss(channel_id: str) -> list[Dict[str, str]]:
+    if not channel_id:
+        return []
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = _http_get_with_retries(feed_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+    except Exception:
+        return []
+
+    ns = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "yt": "http://www.youtube.com/xml/schemas/2015",
+    }
+    entries = root.findall("atom:entry", ns)
+    videos: list[Dict[str, str]] = []
+    for entry in entries:
+        video_id = (entry.findtext("yt:videoId", default="", namespaces=ns) or "").strip()
+        title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
+        published = (entry.findtext("atom:published", default="", namespaces=ns) or "").strip()
+        if not video_id:
+            continue
+        videos.append(
+            {
+                "video_id": video_id,
+                "title": title,
+                "published_at": published,
+            }
+        )
+    return videos
+
+
 def _tv_entry_from_video_id_title(
     video_id: str, title: str, published: str = ""
 ) -> Dict[str, str]:
@@ -927,8 +980,14 @@ def _fetch_eagles_tv_latest() -> Dict[str, Any]:
 
     if _oiyu_needs_channel_fallback(highlight, oiyu):
         time.sleep(0.4)
-        browse = _fetch_eagles_official_videos_browse()
-        if browse:
+        channel_id = _resolve_channel_id_from_handle_page(EAGLES_OFFICIAL_CHANNEL_URL)
+        rss_videos = _fetch_channel_videos_from_rss(channel_id)
+        if rss_videos:
+            picked = _oiyu_from_channel_matched_to_highlight(rss_videos, highlight)
+            if (picked or {}).get("url"):
+                oiyu = picked
+        if _oiyu_needs_channel_fallback(highlight, oiyu):
+            browse = _fetch_eagles_official_videos_browse()
             picked = _oiyu_from_channel_matched_to_highlight(browse, highlight)
             if (picked or {}).get("url"):
                 oiyu = picked
