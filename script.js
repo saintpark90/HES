@@ -400,9 +400,11 @@ const renderSeriesSection = (g) => {
         }
       `
       : '<div class="sched-no-game">-</div>';
+    const ticketUrl = getTicketBookingUrl(row);
+    if (ticketUrl) classes.push("sched-day-clickable");
     const holidayMeta = holidayName ? `<div class="sched-holiday-name">${holidayName}</div>` : "";
     cells.push(`
-      <article class="${classes.join(" ")}">
+      <article class="${classes.join(" ")}"${ticketUrl ? ` data-ticket-url="${ticketUrl}"` : ""}>
         <div class="sched-day-num">${day}</div>
         <div class="sched-day-body">${gameMeta}</div>
         ${holidayMeta}
@@ -420,6 +422,7 @@ const renderSeriesSection = (g) => {
   return `
     <section class="series-section">
       <h2 class="cmp-title">한화 월별 일정</h2>
+      <div class="sched-ticket-note">날짜 카드를 클릭하면 예매 사이트로 이동합니다.</div>
       <div class="sched-head">
         <button type="button" class="sched-nav-btn" data-sched-nav="prev" ${canPrev ? "" : "disabled"} aria-label="이전 달">◀</button>
         <div class="sched-month-label">${monthLabel}</div>
@@ -536,7 +539,6 @@ const renderLatestNewsSection = (g) => {
 
 const bindScheduleCalendarEvents = () => {
   const navButtons = Array.from(document.querySelectorAll("[data-sched-nav]"));
-  if (navButtons.length === 0) return;
   for (const btn of navButtons) {
     btn.addEventListener("click", () => {
       const current = parseMonthKey(scheduleCalendarMonth || "");
@@ -545,6 +547,14 @@ const bindScheduleCalendarEvents = () => {
       const next = new Date(current.getFullYear(), current.getMonth() + (dir === "next" ? 1 : -1), 1);
       scheduleCalendarMonth = formatMonthKey(next);
       renderGame(game, updatedAt);
+    });
+  }
+  const ticketCards = Array.from(document.querySelectorAll("[data-ticket-url]"));
+  for (const card of ticketCards) {
+    card.addEventListener("click", () => {
+      const url = card.getAttribute("data-ticket-url");
+      if (!url) return;
+      window.location.href = url;
     });
   }
 };
@@ -653,6 +663,63 @@ const renderLineupSection = (g) => {
           </thead>
           <tbody>
             ${pitcherRows || `<tr><td colspan="8" class="lineup-empty">투수 성적 정보를 불러오지 못했습니다.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+};
+
+const renderRegisterMoveSection = (g) => {
+  const moves = g?.register_moves || {};
+  const moveDate = String(moves.date || "").trim();
+  const registered = Array.isArray(moves.registered) ? moves.registered : [];
+  const deregistered = Array.isArray(moves.deregistered) ? moves.deregistered : [];
+  const toRows = (rows) => rows.map((item) => `
+      <tr>
+        <td>${item.number || "-"}</td>
+        <td class="lineup-player">${item.name || "-"}</td>
+        <td>${item.position || "-"}</td>
+        <td>${item.throws_bats || "-"}</td>
+        <td>${item.birth_date || "-"}</td>
+      </tr>
+    `).join("");
+
+  return `
+    <section class="move-section">
+      <h2 class="cmp-title">한화 등/말소 현황</h2>
+      <div class="move-date">기준 날짜: ${moveDate || "-"}</div>
+      <div class="lineup-pitcher-title">등록</div>
+      <div class="lineup-table-wrap">
+        <table class="lineup-table">
+          <thead>
+            <tr>
+              <th>등번호</th>
+              <th>선수명</th>
+              <th>포지션</th>
+              <th>투타유형</th>
+              <th>생년월일</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${toRows(registered) || `<tr><td colspan="5" class="lineup-empty">당일 등록된 선수가 없습니다.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="lineup-pitcher-title">말소</div>
+      <div class="lineup-table-wrap">
+        <table class="lineup-table">
+          <thead>
+            <tr>
+              <th>등번호</th>
+              <th>선수명</th>
+              <th>포지션</th>
+              <th>투타유형</th>
+              <th>생년월일</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${toRows(deregistered) || `<tr><td colspan="5" class="lineup-empty">당일 말소된 선수가 없습니다.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -781,6 +848,25 @@ const parseMonthKey = (monthKey) => {
 };
 
 const KBO_EMBLEM_BASE_URL = "https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/emblem/regular";
+const TICKET_URL_BY_TEAM_ID = {
+  HH: "https://www.ticketlink.co.kr/sports/137/63",
+  LG: "https://www.ticketlink.co.kr/sports/137/59",
+  SS: "https://www.ticketlink.co.kr/sports/137/57",
+  KT: "https://www.ticketlink.co.kr/sports/137/62",
+  HT: "https://www.ticketlink.co.kr/sports/137/58",
+  OB: "https://ticket.interpark.com/Contents/Sports/GoodsInfo?SportsCode=07001&TeamCode=PB004",
+  WO: "https://ticket.interpark.com/Contents/Sports/GoodsInfo?SportsCode=07001&TeamCode=PB003",
+  LT: "https://www.giantsclub.com/",
+  NC: "https://www.ncdinos.com/",
+  SK: "https://ticket.ssg.com/ticket",
+};
+
+const getTicketBookingUrl = (scheduleRow) => {
+  if (!scheduleRow) return "";
+  if (scheduleRow.home_away === "홈") return TICKET_URL_BY_TEAM_ID.HH || "";
+  const opponentTeamId = String(scheduleRow.opponent_team_id || "").trim();
+  return TICKET_URL_BY_TEAM_ID[opponentTeamId] || "";
+};
 
 const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
   const sid = String(seasonId || "").trim();
@@ -830,6 +916,7 @@ const renderGame = (g, refreshedAt) => {
     ${renderWeatherSection(g)}
     ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary)}
     ${renderLineupSection(g)}
+    ${renderRegisterMoveSection(g)}
     ${renderSeriesSection(g)}
     ${renderEaglesTvSection(g)}
     ${renderLatestNewsSection(g)}

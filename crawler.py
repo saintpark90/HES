@@ -34,6 +34,7 @@ EAGLES_HIGHLIGHT_PLAYLIST_ID = "PLH13Vc2FtHHh-syagRtonzJLl-SkG3B7Q"
 EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
 NAVER_SPORTS_NEWS_API_URL = "https://api-gw.sports.naver.com/news/articles/kbaseball"
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list={playlist_id}"
+KBO_REGISTER_ALL_URL = "https://www.koreabaseball.com/Player/RegisterAll.aspx"
 # Official channel; used when the 오이유 video is not in the configured playlist (same-day by title suffix as H/L).
 EAGLES_OFFICIAL_CHANNEL_URL = "https://www.youtube.com/@HanwhaEagles_official"
 EAGLES_OFFICIAL_VIDEOS_URL = "https://www.youtube.com/@HanwhaEagles_official/videos"
@@ -60,6 +61,15 @@ TEAM_NAME_TO_ID = {
     "두산": "OB",
     "롯데": "LT",
     "키움": "WO",
+}
+
+POSITION_TEXT_MAP = {
+    "투": "투수",
+    "포": "포수",
+    "내": "내야수",
+    "외": "외야수",
+    "코치": "코치",
+    "감독": "감독",
 }
 
 STADIUM_REGION_COORDS = {
@@ -1045,6 +1055,154 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
             }
         )
     return result
+
+
+def _fetch_player_profile_for_register(name: str) -> Dict[str, str]:
+    player_name = str(name or "").strip()
+    if not player_name:
+        return {}
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"}
+    try:
+        response = requests.post(
+            KBO_PLAYER_SEARCH_URL,
+            data={"name": player_name},
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = json.loads(response.content.decode("utf-8-sig"))
+    except Exception:
+        return {}
+
+    candidates = (payload.get("now") or []) + (payload.get("retire") or [])
+    if not candidates:
+        return {}
+
+    exact = [c for c in candidates if str(c.get("P_NM", "")).strip() == player_name]
+    hh = [c for c in exact if str(c.get("T_ID", "")).strip() == HANWHA_TEAM_ID]
+    picked = (hh or exact or candidates)[0]
+    detail_link = str(picked.get("P_LINK", "") or "").strip()
+    if detail_link.startswith("/"):
+        detail_link = "https://www.koreabaseball.com" + detail_link
+    if not detail_link:
+        player_id = str(picked.get("P_ID", "") or "").strip()
+        if player_id:
+            detail_link = f"https://www.koreabaseball.com/Record/Player/HitterDetail/Basic.aspx?playerId={player_id}"
+    if not detail_link:
+        return {}
+
+    try:
+        detail_resp = requests.get(detail_link, headers=headers, timeout=10)
+        detail_resp.raise_for_status()
+    except Exception:
+        return {}
+
+    soup = BeautifulSoup(detail_resp.text, "html.parser")
+    # birth date
+    birth_raw = ""
+    birth_node = soup.select_one(
+        "#cphContents_cphContents_cphContents_playerProfile_lblBirthday, "
+        "#cphContents_cphContents_cphContents_ucRetireInfo_lblBirthday"
+    )
+    if birth_node:
+        birth_raw = birth_node.get_text(" ", strip=True)
+    birth_match = re.search(r"((19|20)\d{2})\D+(\d{1,2})\D+(\d{1,2})", birth_raw)
+    birth_iso = "-"
+    if birth_match:
+        birth_iso = f"{birth_match.group(1)}-{int(birth_match.group(3)):02d}-{int(birth_match.group(4)):02d}"
+
+    # throws/bats
+    ptype = str(picked.get("P_TYPE", "") or "").strip()
+    if not ptype:
+        pos_node = soup.select_one("#cphContents_cphContents_cphContents_playerProfile_lblPosition")
+        pos_text = pos_node.get_text(" ", strip=True) if pos_node else ""
+        p_match = re.search(r"([좌우양]투[좌우양]타|[좌우양]언[좌우양]타)", pos_text)
+        ptype = p_match.group(1) if p_match else "-"
+
+    # number from search fallback
+    number = str(picked.get("BACK_NO", "") or "").strip() or "-"
+    return {
+        "number": number,
+        "throws_bats": ptype or "-",
+        "birth_date": birth_iso,
+    }
+
+
+def _fetch_hanwha_register_moves() -> Dict[str, Any]:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    empty = {"date": "", "registered": [], "deregistered": []}
+    try:
+        response = requests.get(KBO_REGISTER_ALL_URL, headers=headers, timeout=15)
+        response.raise_for_status()
+    except Exception:
+        return empty
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    register_date = ""
+    date_match = re.search(r"(\d{4}\.\d{2}\.\d{2}\([월화수목금토일]\))", response.text)
+    if date_match:
+        register_date = date_match.group(1)
+    move_tables = []
+    for tb in soup.select("table"):
+        headers_text = [th.get_text(" ", strip=True) for th in tb.select("th")]
+        if headers_text[:3] == ["선수", "포지션", "팀"]:
+            move_tables.append(tb)
+    if len(move_tables) < 2:
+        return empty
+
+    profile_cache: Dict[str, Dict[str, str]] = {}
+    roster_number_by_name: Dict[str, str] = {}
+    team_tables = [tb for tb in soup.select("table") if (tb.select_one("th") and "구단" in tb.select_one("th").get_text(" ", strip=True))]
+    for tb in team_tables:
+        headers_text = [th.get_text(" ", strip=True) for th in tb.select("th")]
+        if not any("한화" in h for h in headers_text):
+            continue
+        row = tb.select_one("tbody tr") or tb.select_one("tr:has(td)")
+        if not row:
+            continue
+        cells = [td.get_text(" ", strip=True) for td in row.select("td")]
+        for cell in cells:
+            for m in re.finditer(r"([^\s()]+)\((\d{1,3})\)", cell):
+                nm = m.group(1).strip()
+                no = m.group(2).strip()
+                if nm and no:
+                    roster_number_by_name[nm] = no
+        break
+
+    def parse_rows(tb) -> list[Dict[str, str]]:
+        out = []
+        for tr in tb.select("tr"):
+            tds = [td.get_text(" ", strip=True) for td in tr.select("td")]
+            if len(tds) < 3:
+                continue
+            name = str(tds[0] or "").strip()
+            pos = str(tds[1] or "").strip()
+            team = str(tds[2] or "").strip()
+            if not name or "없습니다" in name:
+                continue
+            if team not in {"한화", "한화 이글스"}:
+                continue
+            profile = profile_cache.get(name)
+            if profile is None:
+                profile = _fetch_player_profile_for_register(name)
+                profile_cache[name] = profile
+            number = roster_number_by_name.get(name) or str((profile or {}).get("number", "-") or "-")
+            out.append(
+                {
+                    "number": number,
+                    "name": name,
+                    "position": POSITION_TEXT_MAP.get(pos, pos or "-"),
+                    "throws_bats": str((profile or {}).get("throws_bats", "-") or "-"),
+                    "birth_date": str((profile or {}).get("birth_date", "-") or "-"),
+                }
+            )
+        return out
+
+    return {
+        "date": register_date,
+        "registered": parse_rows(move_tables[0]),
+        "deregistered": parse_rows(move_tables[1]),
+    }
 
 
 def _parse_lineup_grid_rows(raw_grid_json: str) -> list[Dict[str, str]]:
@@ -2340,6 +2498,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
     latest_news = _fetch_latest_hanwha_news(limit=5)
+    register_moves = _fetch_hanwha_register_moves()
     today = _today_kst()
 
     for offset in range(max_days_ahead + 1):
@@ -2486,6 +2645,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "current_series": series_info.get("current_series"),
                 "next_series": series_info.get("next_series"),
                 "lineup_info": lineup_info,
+                "register_moves": register_moves,
                 "weather_info": weather_info,
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,

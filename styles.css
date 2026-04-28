@@ -359,6 +359,7 @@ h1 {
 
 .h2h-section,
 .lineup-section,
+.move-section,
 .series-section,
 .eagles-tv-section,
 .news-section,
@@ -535,6 +536,12 @@ h1 {
   margin-bottom: 10px;
 }
 
+.sched-ticket-note {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  color: #666;
+}
+
 .sched-nav-btn {
   border: 1px solid #e2e2e2;
   border-radius: 8px;
@@ -589,6 +596,14 @@ h1 {
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+.sched-day.sched-day-clickable {
+  cursor: pointer;
+}
+
+.sched-day.sched-day-clickable:hover {
+  border-color: #ff8a3d;
 }
 
 .sched-day.sched-day-win {
@@ -972,6 +987,12 @@ h1 {
   font-size: 12px;
 }
 
+.move-date {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: #666;
+}
+
 .lineup-table-wrap {
   overflow-x: auto;
 }
@@ -1008,6 +1029,10 @@ h1 {
 .lineup-table .lineup-player {
   text-align: left;
   font-weight: 600;
+}
+
+.move-section .lineup-table .lineup-player {
+  text-align: center;
 }
 
 .lineup-table .lineup-empty {
