@@ -87,6 +87,33 @@ def _merge_starter_fallbacks(current_info: dict, previous_info: dict) -> dict:
     return merged
 
 
+def _merge_register_moves_fallbacks(current_info: dict, previous_info: dict) -> dict:
+    """당일 등록·말소 인원이 비어 있으면(변동 없음·파싱 실패 등) 직전 스냅샷을 유지한다."""
+    if not current_info:
+        return current_info
+    merged = dict(current_info)
+    cur = merged.get("register_moves")
+    prev = previous_info.get("register_moves")
+    if not isinstance(cur, dict):
+        return merged
+    reg = cur.get("registered") if isinstance(cur.get("registered"), list) else []
+    dereg = cur.get("deregistered") if isinstance(cur.get("deregistered"), list) else []
+    if reg or dereg:
+        return merged
+    if not isinstance(prev, dict):
+        return merged
+    prev_reg = prev.get("registered") if isinstance(prev.get("registered"), list) else []
+    prev_dereg = prev.get("deregistered") if isinstance(prev.get("deregistered"), list) else []
+    if not prev_reg and not prev_dereg:
+        return merged
+    merged["register_moves"] = {
+        "date": str(prev.get("date") or cur.get("date") or ""),
+        "registered": list(prev_reg),
+        "deregistered": list(prev_dereg),
+    }
+    return merged
+
+
 def build() -> None:
     build_holiday_data()
     previous_game_info = _load_previous_game_info()
@@ -94,6 +121,7 @@ def build() -> None:
     if game_info:
         game_info = _merge_media_fallbacks(game_info, previous_game_info)
         game_info = _merge_starter_fallbacks(game_info, previous_game_info)
+        game_info = _merge_register_moves_fallbacks(game_info, previous_game_info)
     has_game = bool(game_info)
     updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 

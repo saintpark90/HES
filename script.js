@@ -6,6 +6,8 @@ let schedulerTimer = null;
 let lastWindowProbeDate = "";
 let scheduleCalendarMonth = "";
 let holidayCalendarData = null;
+/** 등/말소가 당일 비어 있을 때 직전에 표시했던 변동 내역을 유지한다. */
+let lastRegisterMovesSnapshot = null;
 
 if (!container) throw new Error("game-content container not found");
 
@@ -34,7 +36,7 @@ const renderPitcherCard = (teamLabel, name, image, stats, emblemUrl) => {
           <span>ERA</span><strong>${stats?.era || "-"}</strong>
           <span>WAR</span><strong>${stats?.war || "-"}</strong>
           <span>경기</span><strong>${stats?.games || "-"}</strong>
-          <span>평균이닝</span><strong>${stats?.avg_innings || "-"}</strong>
+          <span>이닝</span><strong>${stats?.avg_innings || "-"}</strong>
           <span>QS</span><strong>${stats?.qs || "-"}</strong>
           <span>WHIP</span><strong>${stats?.whip || "-"}</strong>
         </div>
@@ -672,9 +674,21 @@ const renderLineupSection = (g) => {
 
 const renderRegisterMoveSection = (g) => {
   const moves = g?.register_moves || {};
-  const moveDate = String(moves.date || "").trim();
   const registered = Array.isArray(moves.registered) ? moves.registered : [];
   const deregistered = Array.isArray(moves.deregistered) ? moves.deregistered : [];
+  let effective = moves;
+  if (!registered.length && !deregistered.length && lastRegisterMovesSnapshot) {
+    effective = lastRegisterMovesSnapshot;
+  } else if (registered.length || deregistered.length) {
+    lastRegisterMovesSnapshot = {
+      date: String(moves.date || ""),
+      registered: [...registered],
+      deregistered: [...deregistered],
+    };
+  }
+  const moveDate = String(effective.date || "").trim();
+  const regList = Array.isArray(effective.registered) ? effective.registered : [];
+  const deregList = Array.isArray(effective.deregistered) ? effective.deregistered : [];
   const toRows = (rows) => rows.map((item) => `
       <tr>
         <td>${item.number || "-"}</td>
@@ -702,7 +716,7 @@ const renderRegisterMoveSection = (g) => {
             </tr>
           </thead>
           <tbody>
-            ${toRows(registered) || `<tr><td colspan="5" class="lineup-empty">당일 등록된 선수가 없습니다.</td></tr>`}
+            ${toRows(regList) || `<tr><td colspan="5" class="lineup-empty">당일 등록된 선수가 없습니다.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -719,7 +733,7 @@ const renderRegisterMoveSection = (g) => {
             </tr>
           </thead>
           <tbody>
-            ${toRows(deregistered) || `<tr><td colspan="5" class="lineup-empty">당일 말소된 선수가 없습니다.</td></tr>`}
+            ${toRows(deregList) || `<tr><td colspan="5" class="lineup-empty">당일 말소된 선수가 없습니다.</td></tr>`}
           </tbody>
         </table>
       </div>
