@@ -67,6 +67,7 @@ const renderLiveHeader = (g) => {
         <span>현재 투수: ${live.current_pitcher_team || ""} ${live.current_pitcher || "-"}</span>
         <span>현재 타자: ${live.current_batter_team || ""} ${live.current_batter || "-"}</span>
       </div>
+      <div class="live-sync-note">약 30분마다 한번씩만 경기내용이 동기화되니 참고만 부탁드립니다.</div>
     </section>
   `;
 };
@@ -402,11 +403,11 @@ const renderSeriesSection = (g) => {
         }
       `
       : '<div class="sched-no-game">-</div>';
-    const ticketUrl = getTicketBookingUrl(row);
-    if (ticketUrl) classes.push("sched-day-clickable");
+    const linkUrl = getScheduleCardLinkUrl(row, g?.season_id);
+    if (linkUrl) classes.push("sched-day-clickable");
     const holidayMeta = holidayName ? `<div class="sched-holiday-name">${holidayName}</div>` : "";
     cells.push(`
-      <article class="${classes.join(" ")}"${ticketUrl ? ` data-ticket-url="${ticketUrl}"` : ""}>
+      <article class="${classes.join(" ")}"${linkUrl ? ` data-link-url="${linkUrl}"` : ""}>
         <div class="sched-day-num">${day}</div>
         <div class="sched-day-body">${gameMeta}</div>
         ${holidayMeta}
@@ -424,7 +425,7 @@ const renderSeriesSection = (g) => {
   return `
     <section class="series-section">
       <h2 class="cmp-title">한화 월별 일정</h2>
-      <div class="sched-ticket-note">날짜 카드를 클릭하면 예매 사이트로 이동합니다.</div>
+      <div class="sched-ticket-note">날짜 카드를 클릭하면 예매 사이트로 이동합니다. (진행 중·종료된 경기는 네이버 스포츠 중계/결과 페이지로 이동합니다.)</div>
       <div class="sched-head">
         <button type="button" class="sched-nav-btn" data-sched-nav="prev" ${canPrev ? "" : "disabled"} aria-label="이전 달">◀</button>
         <div class="sched-month-label">${monthLabel}</div>
@@ -551,10 +552,10 @@ const bindScheduleCalendarEvents = () => {
       renderGame(game, updatedAt);
     });
   }
-  const ticketCards = Array.from(document.querySelectorAll("[data-ticket-url]"));
-  for (const card of ticketCards) {
+  const linkCards = Array.from(document.querySelectorAll("[data-link-url]"));
+  for (const card of linkCards) {
     card.addEventListener("click", () => {
-      const url = card.getAttribute("data-ticket-url");
+      const url = card.getAttribute("data-link-url");
       if (!url) return;
       window.location.href = url;
     });
@@ -880,6 +881,25 @@ const getTicketBookingUrl = (scheduleRow) => {
   if (scheduleRow.home_away === "홈") return TICKET_URL_BY_TEAM_ID.HH || "";
   const opponentTeamId = String(scheduleRow.opponent_team_id || "").trim();
   return TICKET_URL_BY_TEAM_ID[opponentTeamId] || "";
+};
+
+// 경기가 진행 중이거나 종료된 경우 네이버 스포츠 중계/결과 페이지 URL을 반환한다.
+// 예: game_id="20260508LGHH0" + season_id="2026" → .../game/20260508LGHH02026/relay
+const getNaverGameRelayUrl = (scheduleRow, seasonId) => {
+  if (!scheduleRow) return "";
+  if (!scheduleRow.is_final && !scheduleRow.is_live) return "";
+  if (scheduleRow.result === "취소") return "";
+  const gameId = String(scheduleRow.game_id || "").trim();
+  const sid = String(seasonId || "").trim();
+  if (!gameId || !sid) return "";
+  return `https://m.sports.naver.com/game/${gameId}${sid}/relay`;
+};
+
+// 일정 카드 클릭 시 이동할 URL을 결정한다(끝/진행 중인 경기는 네이버 중계, 그 외는 예매).
+const getScheduleCardLinkUrl = (scheduleRow, seasonId) => {
+  const relayUrl = getNaverGameRelayUrl(scheduleRow, seasonId);
+  if (relayUrl) return relayUrl;
+  return getTicketBookingUrl(scheduleRow);
 };
 
 const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
