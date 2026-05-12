@@ -278,6 +278,9 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
     avg_pop = sum(game_window_pops) / max(1, len(game_window_pops))
     max_pop = max(game_window_pops) if game_window_pops else 0
     progress_probability = int(round(max(0, min(100, 100 - (avg_pop * 0.6 + max_pop * 0.4)))))
+    # 고척돔은 돔구장이라 기상과 무관하게 경기 진행 확률 100%로 고정.
+    if "고척" in str(stadium_name or ""):
+        progress_probability = 100
 
     aq_params = {
         "latitude": coords["lat"],
@@ -979,6 +982,29 @@ def _oiyu_needs_channel_fallback(
     return o_date != h_date
 
 
+def _is_highlight_video_title(title: str) -> bool:
+    t = (title or "").strip()
+    if not t:
+        return False
+    return ("H/L" in t) or ("하이라이트" in t)
+
+
+def _highlight_from_channel_videos(channel_videos: list[Dict[str, str]]) -> Dict[str, str]:
+    if not channel_videos:
+        return {}
+    for v in channel_videos:
+        title = str((v or {}).get("title", "") or "").strip()
+        video_id = str((v or {}).get("video_id", "") or "").strip()
+        if not video_id or not _is_highlight_video_title(title):
+            continue
+        return _tv_entry_from_video_id_title(
+            video_id,
+            title,
+            str((v or {}).get("published_at", "") or ""),
+        )
+    return {}
+
+
 def _fetch_eagles_tv_latest() -> Dict[str, Any]:
     # Fetch in sequence. Back-to-back YouTube requests on CI can occasionally return empty; retry oiyu once.
     highlight = _fetch_latest_playlist_video(EAGLES_HIGHLIGHT_PLAYLIST_ID)
@@ -988,17 +1014,40 @@ def _fetch_eagles_tv_latest() -> Dict[str, Any]:
         time.sleep(1.0)
         oiyu = _fetch_latest_playlist_video(EAGLES_OIYU_PLAYLIST_ID)
 
-    if _oiyu_needs_channel_fallback(highlight, oiyu):
+    channel_id = ""
+    rss_videos: list[Dict[str, str]] = []
+    browse_videos: list[Dict[str, str]] = []
+
+    if not (highlight or {}).get("url") or _oiyu_needs_channel_fallback(highlight, oiyu):
         time.sleep(0.4)
         channel_id = _resolve_channel_id_from_handle_page(EAGLES_OFFICIAL_CHANNEL_URL)
-        rss_videos = _fetch_channel_videos_from_rss(channel_id)
+        if channel_id:
+            rss_videos = _fetch_channel_videos_from_rss(channel_id)
+
+    if not (highlight or {}).get("url") and rss_videos:
+        picked_highlight = _highlight_from_channel_videos(rss_videos)
+        if (picked_highlight or {}).get("url"):
+            highlight = picked_highlight
+
+    if _oiyu_needs_channel_fallback(highlight, oiyu):
         if rss_videos:
             picked = _oiyu_from_channel_matched_to_highlight(rss_videos, highlight)
             if (picked or {}).get("url"):
                 oiyu = picked
-        if _oiyu_needs_channel_fallback(highlight, oiyu):
-            browse = _fetch_eagles_official_videos_browse()
-            picked = _oiyu_from_channel_matched_to_highlight(browse, highlight)
+
+    if not (highlight or {}).get("url") or _oiyu_needs_channel_fallback(highlight, oiyu):
+        browse_videos = _fetch_eagles_official_videos_browse()
+
+    if not (highlight or {}).get("url") and browse_videos:
+        picked_highlight = _highlight_from_channel_videos(browse_videos)
+        if (picked_highlight or {}).get("url"):
+            highlight = picked_highlight
+
+    if _oiyu_needs_channel_fallback(highlight, oiyu):
+        if not browse_videos:
+            browse_videos = _fetch_eagles_official_videos_browse()
+        if browse_videos:
+            picked = _oiyu_from_channel_matched_to_highlight(browse_videos, highlight)
             if (picked or {}).get("url"):
                 oiyu = picked
 
