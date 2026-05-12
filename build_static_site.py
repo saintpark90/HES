@@ -12,6 +12,7 @@ ROOT = Path(__file__).parent
 TEMPLATE_PATH = ROOT / "index.template.html"
 OUTPUT_PATH = ROOT / "index.html"
 DATA_OUTPUT_PATH = ROOT / "game-data.json"
+REGISTER_MOVES_CACHE_PATH = ROOT / "register-moves-cache.json"
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -114,14 +115,93 @@ def _merge_register_moves_fallbacks(current_info: dict, previous_info: dict) -> 
     return merged
 
 
+def _load_register_moves_cache() -> dict:
+    if not REGISTER_MOVES_CACHE_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(REGISTER_MOVES_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _has_non_empty_register_moves(data: dict) -> bool:
+    if not isinstance(data, dict):
+        return False
+    reg = data.get("registered") if isinstance(data.get("registered"), list) else []
+    dereg = data.get("deregistered") if isinstance(data.get("deregistered"), list) else []
+    return bool(reg or dereg)
+
+
+def _merge_register_moves_cache_fallback(current_info: dict, cache_moves: dict) -> dict:
+    if not current_info or not isinstance(cache_moves, dict):
+        return current_info
+    merged = dict(current_info)
+    cur = merged.get("register_moves")
+    if not isinstance(cur, dict):
+        return merged
+    if _has_non_empty_register_moves(cur):
+        return merged
+    if not _has_non_empty_register_moves(cache_moves):
+        return merged
+    merged["register_moves"] = {
+        "date": str(cache_moves.get("date") or cur.get("date") or ""),
+        "registered": list(cache_moves.get("registered") or []),
+        "deregistered": list(cache_moves.get("deregistered") or []),
+    }
+    return merged
+
+
+def _update_register_moves_cache_from_game_info(game_info: dict) -> None:
+    if not game_info:
+        return
+    moves = game_info.get("register_moves")
+    if not isinstance(moves, dict):
+        return
+    if not _has_non_empty_register_moves(moves):
+        return
+    payload = {
+        "date": str(moves.get("date") or ""),
+        "registered": list(moves.get("registered") or []),
+        "deregistered": list(moves.get("deregistered") or []),
+    }
+    REGISTER_MOVES_CACHE_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _seed_register_moves_cache_from_previous(previous_game_info: dict) -> None:
+    if REGISTER_MOVES_CACHE_PATH.exists():
+        return
+    if not isinstance(previous_game_info, dict):
+        return
+    moves = previous_game_info.get("register_moves")
+    if not isinstance(moves, dict) or not _has_non_empty_register_moves(moves):
+        return
+    payload = {
+        "date": str(moves.get("date") or ""),
+        "registered": list(moves.get("registered") or []),
+        "deregistered": list(moves.get("deregistered") or []),
+    }
+    REGISTER_MOVES_CACHE_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def build() -> None:
     build_holiday_data()
     previous_game_info = _load_previous_game_info()
+    _seed_register_moves_cache_from_previous(previous_game_info)
+    register_moves_cache = _load_register_moves_cache()
     game_info = get_next_hanwha_game() or {}
     if game_info:
         game_info = _merge_media_fallbacks(game_info, previous_game_info)
         game_info = _merge_starter_fallbacks(game_info, previous_game_info)
         game_info = _merge_register_moves_fallbacks(game_info, previous_game_info)
+        game_info = _merge_register_moves_cache_fallback(game_info, register_moves_cache)
+        _update_register_moves_cache_from_game_info(game_info)
     has_game = bool(game_info)
     updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 
