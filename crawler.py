@@ -738,6 +738,32 @@ def _trailing_date_paren_from_title(title: str) -> str:
     return m.group(1) if m else ""
 
 
+def _month_day_from_title_suffix(title: str) -> Optional[tuple[int, int]]:
+    suffix = _trailing_date_paren_from_title(title)
+    m = re.match(r"^\(([0-9]{1,2})\.([0-9]{1,2})\)$", suffix)
+    if not m:
+        return None
+    month = int(m.group(1))
+    day = int(m.group(2))
+    if month < 1 or month > 12 or day < 1 or day > 31:
+        return None
+    return (month, day)
+
+
+def _pick_newer_highlight(current: Dict[str, str], candidate: Dict[str, str]) -> Dict[str, str]:
+    if not (candidate or {}).get("url"):
+        return current
+    if not (current or {}).get("url"):
+        return candidate
+    cur_md = _month_day_from_title_suffix((current or {}).get("title", "") or "")
+    cand_md = _month_day_from_title_suffix((candidate or {}).get("title", "") or "")
+    if cur_md and cand_md:
+        return candidate if cand_md > cur_md else current
+    if (not cur_md) and cand_md:
+        return candidate
+    return current
+
+
 def _is_regular_season_hl_row_title(title: str) -> bool:
     """True for typical [정규시즌 H/L] highlight rows; 오이유 pick should skip these."""
     t = (title or "")
@@ -968,6 +994,29 @@ def _oiyu_from_channel_matched_to_highlight(
     return {}
 
 
+def _oiyu_from_channel_by_date_suffix(
+    channel_videos: list[Dict[str, str]], highlight: Dict[str, str]
+) -> Dict[str, str]:
+    date_suffix = _trailing_date_paren_from_title((highlight or {}).get("title", "") or "")
+    if not date_suffix or not channel_videos:
+        return {}
+    for v in channel_videos:
+        title = str((v or {}).get("title", "") or "").strip()
+        video_id = str((v or {}).get("video_id", "") or "").strip()
+        if not video_id:
+            continue
+        if not title.rstrip().endswith(date_suffix):
+            continue
+        if _is_regular_season_hl_row_title(title):
+            continue
+        return _tv_entry_from_video_id_title(
+            video_id,
+            title,
+            str((v or {}).get("published_at", "") or ""),
+        )
+    return {}
+
+
 def _oiyu_needs_channel_fallback(
     highlight: Dict[str, str], oiyu: Dict[str, str]
 ) -> bool:
@@ -1026,12 +1075,13 @@ def _fetch_eagles_tv_latest() -> Dict[str, Any]:
 
     if not (highlight or {}).get("url") and rss_videos:
         picked_highlight = _highlight_from_channel_videos(rss_videos)
-        if (picked_highlight or {}).get("url"):
-            highlight = picked_highlight
+        highlight = _pick_newer_highlight(highlight, picked_highlight)
 
     if _oiyu_needs_channel_fallback(highlight, oiyu):
         if rss_videos:
             picked = _oiyu_from_channel_matched_to_highlight(rss_videos, highlight)
+            if not (picked or {}).get("url"):
+                picked = _oiyu_from_channel_by_date_suffix(rss_videos, highlight)
             if (picked or {}).get("url"):
                 oiyu = picked
 
@@ -1040,16 +1090,36 @@ def _fetch_eagles_tv_latest() -> Dict[str, Any]:
 
     if not (highlight or {}).get("url") and browse_videos:
         picked_highlight = _highlight_from_channel_videos(browse_videos)
-        if (picked_highlight or {}).get("url"):
-            highlight = picked_highlight
+        highlight = _pick_newer_highlight(highlight, picked_highlight)
+
+    # 재생목록 반영 지연으로 highlight가 오래된 날짜로 남는 경우가 있어,
+    # 채널(/videos, RSS)에서 찾은 더 최신 H/L이 있으면 항상 교체한다.
+    if rss_videos:
+        highlight = _pick_newer_highlight(highlight, _highlight_from_channel_videos(rss_videos))
+    if browse_videos:
+        highlight = _pick_newer_highlight(highlight, _highlight_from_channel_videos(browse_videos))
 
     if _oiyu_needs_channel_fallback(highlight, oiyu):
         if not browse_videos:
             browse_videos = _fetch_eagles_official_videos_browse()
         if browse_videos:
             picked = _oiyu_from_channel_matched_to_highlight(browse_videos, highlight)
+            if not (picked or {}).get("url"):
+                picked = _oiyu_from_channel_by_date_suffix(browse_videos, highlight)
             if (picked or {}).get("url"):
                 oiyu = picked
+
+    # Highlight를 최신 날짜로 교체한 뒤, 오이유 날짜가 다시 어긋날 수 있어 마지막에 한 번 더 동기화.
+    if _oiyu_needs_channel_fallback(highlight, oiyu):
+        for source in (rss_videos, browse_videos):
+            if not source:
+                continue
+            picked = _oiyu_from_channel_matched_to_highlight(source, highlight)
+            if not (picked or {}).get("url"):
+                picked = _oiyu_from_channel_by_date_suffix(source, highlight)
+            if (picked or {}).get("url"):
+                oiyu = picked
+                break
 
     return {"highlight": highlight, "oiyu": oiyu}
 
