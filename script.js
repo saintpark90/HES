@@ -104,6 +104,29 @@ const escapeHtml = (s) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+/** 그늘 참고 이미지를 원본 픽셀 크기로 새 창에서 연다. 새 창에서 이미지 클릭 시 창을 닫는다. */
+const openSunshadeImageOriginalViewer = (src) => {
+  const token = String(src || "").trim();
+  if (!token) return;
+  const absSrc = new URL(token, window.location.href).href;
+  const w = window.open("", "_blank", "noopener,noreferrer");
+  if (!w) return;
+  const imgSrc = JSON.stringify(absSrc);
+  const html =
+    "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"/>" +
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
+    "<title>원본 이미지</title></head>" +
+    "<body style=\"margin:0;background:#0d0d0d;min-height:100vh;overflow:auto;display:flex;justify-content:center;align-items:flex-start;\">" +
+    "<img src=" +
+    imgSrc +
+    " alt=\"\" style=\"display:block;cursor:pointer;max-width:none;width:auto;height:auto;\" onclick=\"window.close()\" title=\"클릭하면 창이 닫힙니다\" />" +
+    "</body></html>";
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+};
+
 const renderShadeSunMarkup = () => {
   const rows = SHADE_SUN_STADIUMS.map(
     (row) => `
@@ -157,6 +180,7 @@ const bindSunShadowEvents = () => {
     imgEl.onerror = null;
     imgEl.removeAttribute("src");
     imgEl.alt = "";
+    imgEl.removeAttribute("title");
     imgEl.classList.remove("sun-shade-image--visible");
     if (loadingEl) {
       loadingEl.hidden = true;
@@ -212,6 +236,7 @@ const bindSunShadowEvents = () => {
     panelList.hidden = true;
     panelDetail.hidden = false;
     imgEl.alt = `${team} ${stadium} 시간대별 태양·그늘 참고 이미지`;
+    imgEl.title = "클릭하면 원본 크기로 새 창에서 열립니다.";
     imgEl.onload = () => {
       if (token !== sunShadeImgLoadToken) return;
       if (loadingEl) loadingEl.hidden = true;
@@ -224,12 +249,22 @@ const bindSunShadowEvents = () => {
         loadingEl.textContent = "이미지를 불러오지 못했습니다.";
       }
       imgEl.classList.remove("sun-shade-image--visible");
+      imgEl.removeAttribute("title");
     };
     imgEl.src = `./sun/${encodeURIComponent(file)}`;
     if (imgEl.complete && imgEl.naturalWidth > 0 && token === sunShadeImgLoadToken) {
       if (loadingEl) loadingEl.hidden = true;
       imgEl.classList.add("sun-shade-image--visible");
     }
+  });
+
+  imgEl.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!imgEl.classList.contains("sun-shade-image--visible")) return;
+    const src = imgEl.currentSrc || imgEl.getAttribute("src") || "";
+    if (!src) return;
+    openSunshadeImageOriginalViewer(src);
   });
 
   if (!sunShadeEscapeListenerAttached) {
@@ -256,6 +291,7 @@ const bindSunShadowEvents = () => {
             img.onload = null;
             img.onerror = null;
             img.removeAttribute("src");
+            img.removeAttribute("title");
             img.alt = "";
             img.classList.remove("sun-shade-image--visible");
           }
@@ -275,6 +311,7 @@ const bindSunShadowEvents = () => {
           img.onload = null;
           img.onerror = null;
           img.removeAttribute("src");
+          img.removeAttribute("title");
           img.alt = "";
           img.classList.remove("sun-shade-image--visible");
         }

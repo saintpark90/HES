@@ -473,6 +473,7 @@ body.sun-shade-open {
 
 .sun-shade-image.sun-shade-image--visible {
   opacity: 1;
+  cursor: pointer;
 }
 
 .sun-shade-caption {
