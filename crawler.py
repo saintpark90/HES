@@ -2599,6 +2599,91 @@ def _collect_hanwha_season_schedule(
     return items
 
 
+def _league_game_outcome_label(game: Dict[str, Any]) -> str:
+    """전 구단 경기 카드용: 원정승 / 홈승 / 무 / 취소 / 진행중 / 미표시(빈 문자열)."""
+    cancel_id = str(game.get("CANCEL_SC_ID", "") or "").strip()
+    cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
+    if (cancel_id and cancel_id not in {"0"}) or ("취소" in cancel_name):
+        return "취소"
+    if _is_live_game(game):
+        return "진행중"
+    if not _is_final_game(game):
+        return ""
+    try:
+        away = int(str(game.get("T_SCORE_CN", "0") or "0"))
+        home = int(str(game.get("B_SCORE_CN", "0") or "0"))
+    except Exception:
+        return ""
+    if away > home:
+        return "원정승"
+    if home > away:
+        return "홈승"
+    return "무"
+
+
+def _serialize_yesterday_league_game_row(
+    game: Dict[str, Any], *, game_date_iso: str, season_fallback: str
+) -> Dict[str, Any]:
+    away_id = str(game.get("AWAY_ID", "") or "").strip()
+    home_id = str(game.get("HOME_ID", "") or "").strip()
+    season_id = str(game.get("SEASON_ID", "") or "").strip() or season_fallback
+    state = str(game.get("GAME_STATE_SC", "") or "").strip()
+    is_live = state == "2"
+    is_final = state in {"3", "4"}
+    outcome = _league_game_outcome_label(game)
+    away_score = str(game.get("T_SCORE_CN", "") or "").strip()
+    home_score = str(game.get("B_SCORE_CN", "") or "").strip()
+    if outcome == "취소":
+        away_score, home_score = "", ""
+    elif outcome in {"", "진행중"} and not away_score and not home_score:
+        away_score, home_score = "-", "-"
+    return {
+        "date": game_date_iso,
+        "game_id": str(game.get("G_ID", "") or "").strip(),
+        "season_id": season_id,
+        "game_time": str(game.get("G_TM", "") or "").strip(),
+        "stadium": str(game.get("S_NM", "") or "").strip(),
+        "away_team": str(game.get("AWAY_NM", "") or "").strip(),
+        "home_team": str(game.get("HOME_NM", "") or "").strip(),
+        "away_team_id": away_id,
+        "home_team_id": home_id,
+        "away_score": away_score,
+        "home_score": home_score,
+        "is_live": is_live,
+        "is_final": is_final,
+        "result": outcome,
+        "home_away": "",
+    }
+
+
+def _fetch_yesterday_league_scoreboard(today: date) -> tuple[str, list[Dict[str, Any]]]:
+    """한국시간 기준 전날 KBO 전 경기(종료·진행·취소) 요약."""
+    yesterday = today - timedelta(days=1)
+    ymd = yesterday.isoformat()
+    season_fallback = str(yesterday.year)
+    try:
+        raw_games = _fetch_games(yesterday)
+    except Exception:
+        return ymd, []
+    rows: list[Dict[str, Any]] = []
+    for game in raw_games:
+        if not isinstance(game, dict):
+            continue
+        gid = str(game.get("G_ID", "") or "").strip()
+        if not gid:
+            continue
+        outcome = _league_game_outcome_label(game)
+        if not outcome:
+            continue
+        rows.append(
+            _serialize_yesterday_league_game_row(
+                game, game_date_iso=ymd, season_fallback=season_fallback
+            )
+        )
+    rows.sort(key=lambda r: (str(r.get("game_time", "")), str(r.get("game_id", ""))))
+    return ymd, rows
+
+
 def _get_hanwha_season_schedule_cached(season_id: str) -> list[Dict[str, Any]]:
     key = str(season_id or _today_kst().year)
     now_ts = time.time()
@@ -2619,6 +2704,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     latest_news = _fetch_latest_hanwha_news(limit=5)
     register_moves = _fetch_hanwha_register_moves()
     today = _today_kst()
+    yesterday_ymd, yesterday_league_games = _fetch_yesterday_league_scoreboard(today)
 
     for offset in range(max_days_ahead + 1):
         target = today + timedelta(days=offset)
@@ -2769,5 +2855,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,
                 "season_schedule": season_schedule,
+                "yesterday_league_date": yesterday_ymd,
+                "yesterday_league_games": yesterday_league_games,
             }
     return None

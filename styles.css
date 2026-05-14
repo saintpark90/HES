@@ -271,6 +271,191 @@ h1 {
   flex: 0 0 auto;
 }
 
+.weather-shade-actions {
+  margin-bottom: 12px;
+}
+
+.weather-shade-btn {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(180deg, #ff8533 0%, #ff6600 100%);
+  border: 1px solid #e55a00;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.weather-shade-btn:hover {
+  filter: brightness(1.03);
+}
+
+.weather-shade-btn:active {
+  transform: translateY(1px);
+}
+
+body.sun-shade-open {
+  overflow: hidden;
+}
+
+.sun-shade-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 12px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* `hidden`은 display:none인데, 위의 display:flex가 그것을 덮어써 처음부터 보이거나 닫혀도 안 사라지는 문제가 생긴다 */
+.sun-shade-backdrop[hidden] {
+  display: none !important;
+}
+
+.sun-shade-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  max-height: min(96vh, 960px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.sun-shade-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  font-size: 26px;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.sun-shade-close:hover {
+  background: #f2f2f2;
+  color: #333;
+}
+
+.sun-shade-dialog-title {
+  margin: 0;
+  padding: 16px 44px 6px 16px;
+  font-size: 16px;
+  color: #ff6600;
+}
+
+.sun-shade-hint {
+  margin: 0 16px 10px;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.sun-shade-panel {
+  padding: 0 12px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.sun-shade-panel--list {
+  padding-top: 4px;
+}
+
+.sun-shade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sun-shade-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fafafa;
+  cursor: pointer;
+  color: #222;
+}
+
+.sun-shade-row:hover {
+  border-color: #ffc299;
+  background: #fff8f3;
+}
+
+.sun-shade-row-team {
+  font-weight: 800;
+  color: #a64e22;
+}
+
+.sun-shade-row-sep {
+  color: #bbb;
+  font-weight: 400;
+}
+
+.sun-shade-row-stadium {
+  font-size: 13px;
+  color: #444;
+}
+
+.sun-shade-back-btn {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  color: #333;
+}
+
+.sun-shade-back-btn:hover {
+  background: #f5f5f5;
+}
+
+.sun-shade-image-wrap {
+  border-radius: 8px;
+  overflow: auto;
+  max-height: min(76vh, 820px);
+  border: 1px solid #eee;
+  background: #f9f9f9;
+}
+
+.sun-shade-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  vertical-align: top;
+}
+
+.sun-shade-caption {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
 .weather-hourly-wrap {
   overflow-x: scroll;
   scrollbar-gutter: stable both-edges;
@@ -374,7 +559,8 @@ h1 {
 .eagles-tv-section,
 .news-section,
 .weather-section,
-.rank-section {
+.rank-section,
+.yesterday-league-section {
   margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid #eee;
@@ -405,6 +591,168 @@ h1 {
   margin: 0 0 14px;
   font-size: 16px;
   color: #ff6600;
+}
+
+.yesterday-league-date {
+  font-weight: 600;
+  color: #555;
+}
+
+.yesterday-league-note {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.yesterday-league-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0 10px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+.yesterday-league-grid::-webkit-scrollbar {
+  height: 8px;
+}
+
+.yesterday-league-grid::-webkit-scrollbar-track {
+  background: #f2f2f2;
+  border-radius: 999px;
+}
+
+.yesterday-league-grid::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+  border-radius: 999px;
+}
+
+.yesterday-league-grid::-webkit-scrollbar-thumb:hover {
+  background: #b2b2b2;
+}
+
+.yesterday-league-card {
+  flex: 0 0 auto;
+  width: 150px;
+  min-width: 150px;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  padding: 10px 8px 8px;
+  background: #fafafa;
+  box-sizing: border-box;
+}
+
+.yesterday-league-card--clickable {
+  cursor: pointer;
+}
+
+.yesterday-league-card--clickable:hover {
+  border-color: #ffc299;
+  background: #fff8f3;
+}
+
+.yesterday-league-card-top {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 4px;
+  align-items: center;
+}
+
+.yesterday-league-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  min-width: 0;
+}
+
+.yesterday-league-side--away {
+  align-items: flex-start;
+}
+
+.yesterday-league-side--home {
+  align-items: flex-end;
+}
+
+.yesterday-league-side--winner .yesterday-league-team-name {
+  font-weight: 800;
+  color: #a64e22;
+}
+
+.yesterday-league-emblem {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.yesterday-league-team-name {
+  font-size: 12px;
+  color: #333;
+  line-height: 1.2;
+  word-break: keep-all;
+}
+
+.yesterday-league-center {
+  text-align: center;
+  padding: 0 2px;
+}
+
+.yesterday-league-score {
+  font-size: 15px;
+  font-weight: 800;
+  color: #222;
+  letter-spacing: 0.02em;
+}
+
+.yesterday-league-result {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #555;
+}
+
+.yesterday-league-result--away {
+  color: #1a5fb4;
+}
+
+.yesterday-league-result--home {
+  color: #c01c28;
+}
+
+.yesterday-league-result--draw {
+  color: #666;
+}
+
+.yesterday-league-result--cancel {
+  color: #888;
+}
+
+.yesterday-league-result--live {
+  color: #d14000;
+}
+
+.yesterday-league-foot {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: #777;
+}
+
+.yesterday-league-time {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: #555;
 }
 
 .cmp-table {

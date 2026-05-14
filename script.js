@@ -8,6 +8,7 @@ let scheduleCalendarMonth = "";
 let holidayCalendarData = null;
 /** 등/말소가 당일 비어 있을 때 직전에 표시했던 변동 내역을 유지한다. */
 let lastRegisterMovesSnapshot = null;
+let sunShadeEscapeListenerAttached = false;
 
 if (!container) throw new Error("game-content container not found");
 
@@ -80,6 +81,148 @@ const WEATHER_ICON_MAP = {
   snow: "❄️",
   fog: "🌫️",
   storm: "⛈️",
+};
+
+/** `sun/` 폴더 이미지 파일명(홈구단 기준)과 구장 표기 */
+const SHADE_SUN_STADIUMS = [
+  { team: "한화", stadium: "대전 한화생명볼파크", imageFile: "한화.png" },
+  { team: "두산", stadium: "서울 잠실야구장 (두산 홈)", imageFile: "두산.png" },
+  { team: "KT", stadium: "수원 KT위즈파크", imageFile: "kt.png" },
+  { team: "SSG", stadium: "인천 SSG 랜더스필드", imageFile: "SSG.png" },
+  { team: "NC", stadium: "창원 NC파크", imageFile: "NC.png" },
+  { team: "삼성", stadium: "대구 삼성라이온즈파크", imageFile: "삼성.png" },
+  { team: "KIA", stadium: "광주 챔피언스 필드", imageFile: "KIA.png" },
+  { team: "롯데", stadium: "부산 사직야구장", imageFile: "롯데.png" },
+  { team: "LG", stadium: "서울 잠실야구장 (LG 홈)", imageFile: "LG.png" },
+];
+
+const escapeHtml = (s) =>
+  String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const renderShadeSunMarkup = () => {
+  const rows = SHADE_SUN_STADIUMS.map(
+    (row) => `
+      <button type="button" class="sun-shade-row" data-shade-file="${escapeHtml(row.imageFile)}">
+        <span class="sun-shade-row-team">${escapeHtml(row.team)}</span>
+        <span class="sun-shade-row-sep">·</span>
+        <span class="sun-shade-row-stadium">${escapeHtml(row.stadium)}</span>
+      </button>
+    `,
+  ).join("");
+  return `
+    <div class="weather-shade-actions">
+      <button type="button" class="weather-shade-btn" id="sun-shade-open-btn">구장별 시간에 따른 그늘 정보</button>
+    </div>
+    <div class="sun-shade-backdrop" id="sun-shade-backdrop" hidden>
+      <div class="sun-shade-dialog" role="dialog" aria-modal="true" aria-labelledby="sun-shade-dialog-title">
+        <button type="button" class="sun-shade-close" id="sun-shade-close-btn" aria-label="닫기">×</button>
+        <h3 id="sun-shade-dialog-title" class="sun-shade-dialog-title">구장별 태양·그늘 참고</h3>
+        <p class="sun-shade-hint">홈구단 · 구장을 누르면 해당 자료 이미지를 볼 수 있습니다.</p>
+        <div class="sun-shade-panel sun-shade-panel--list" id="sun-shade-panel-list">
+          <div class="sun-shade-list">${rows}</div>
+        </div>
+        <div class="sun-shade-panel sun-shade-panel--detail" id="sun-shade-panel-detail" hidden>
+          <button type="button" class="sun-shade-back-btn" id="sun-shade-back-btn">← 구장 목록</button>
+          <div class="sun-shade-image-wrap">
+            <img src="" alt="" class="sun-shade-image" id="sun-shade-image" loading="lazy" />
+          </div>
+          <div class="sun-shade-caption" id="sun-shade-caption"></div>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+const bindSunShadowEvents = () => {
+  const backdrop = document.getElementById("sun-shade-backdrop");
+  const openBtn = document.getElementById("sun-shade-open-btn");
+  const closeBtn = document.getElementById("sun-shade-close-btn");
+  const panelList = document.getElementById("sun-shade-panel-list");
+  const panelDetail = document.getElementById("sun-shade-panel-detail");
+  const backBtn = document.getElementById("sun-shade-back-btn");
+  const imgEl = document.getElementById("sun-shade-image");
+  const captionEl = document.getElementById("sun-shade-caption");
+  if (!backdrop || !openBtn || !panelList || !panelDetail || !imgEl || !captionEl) return;
+
+  const showList = () => {
+    panelList.hidden = false;
+    panelDetail.hidden = true;
+    imgEl.removeAttribute("src");
+    imgEl.alt = "";
+  };
+
+  const openModal = () => {
+    showList();
+    backdrop.hidden = false;
+    document.body.classList.add("sun-shade-open");
+    closeBtn?.focus();
+  };
+
+  const closeModal = () => {
+    backdrop.hidden = true;
+    document.body.classList.remove("sun-shade-open");
+    showList();
+  };
+
+  openBtn.addEventListener("click", () => openModal());
+  closeBtn?.addEventListener("click", () => closeModal());
+  backBtn?.addEventListener("click", () => showList());
+
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeModal();
+  });
+
+  panelList.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-shade-file]");
+    if (!row || !panelList.contains(row)) return;
+    const file = row.getAttribute("data-shade-file");
+    if (!file) return;
+    const meta = SHADE_SUN_STADIUMS.find((r) => r.imageFile === file);
+    const team = meta?.team || "";
+    const stadium = meta?.stadium || "";
+    imgEl.src = `./sun/${encodeURIComponent(file)}`;
+    imgEl.alt = `${team} ${stadium} 시간대별 태양·그늘 참고 이미지`;
+    captionEl.textContent = `${team} · ${stadium}`;
+    panelList.hidden = true;
+    panelDetail.hidden = false;
+  });
+
+  if (!sunShadeEscapeListenerAttached) {
+    sunShadeEscapeListenerAttached = true;
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Escape") return;
+        const bd = document.getElementById("sun-shade-backdrop");
+        if (!bd || bd.hidden) return;
+        const detail = document.getElementById("sun-shade-panel-detail");
+        const list = document.getElementById("sun-shade-panel-list");
+        const img = document.getElementById("sun-shade-image");
+        if (detail && !detail.hidden) {
+          if (list) list.hidden = false;
+          detail.hidden = true;
+          if (img) {
+            img.removeAttribute("src");
+            img.alt = "";
+          }
+          return;
+        }
+        bd.hidden = true;
+        document.body.classList.remove("sun-shade-open");
+        if (list) list.hidden = false;
+        if (detail) detail.hidden = true;
+        if (img) {
+          img.removeAttribute("src");
+          img.alt = "";
+        }
+      },
+      true,
+    );
+  }
 };
 
 const getDustGradeMeta = (value, kind) => {
@@ -164,6 +307,7 @@ const renderWeatherSection = (g) => {
           </div>
         </div>
       </div>
+      ${renderShadeSunMarkup()}
       <div class="weather-hourly-wrap">
         <div class="weather-hourly-grid">
           ${dateCard}
@@ -909,6 +1053,71 @@ const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
   return `${KBO_EMBLEM_BASE_URL}/${sid}/emblem_${tid}.png`;
 };
 
+const renderYesterdayLeagueSection = (g) => {
+  const raw = Array.isArray(g?.yesterday_league_games) ? g.yesterday_league_games : [];
+  if (raw.length === 0) return "";
+  const ymd = g.yesterday_league_date || "";
+  const dt = parseYmdAsLocalDate(ymd);
+  const titleDate = dt
+    ? `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`
+    : ymd;
+  const sid = String(g?.season_id || "").trim();
+  const games = [...raw].sort((a, b) => {
+    const aH = a.away_team_id === "HH" || a.home_team_id === "HH" ? 0 : 1;
+    const bH = b.away_team_id === "HH" || b.home_team_id === "HH" ? 0 : 1;
+    if (aH !== bH) return aH - bH;
+    return String(a.game_time || "").localeCompare(String(b.game_time || ""), "ko");
+  });
+  const cards = games
+    .map((row) => {
+      const awayEm = getOpponentEmblemUrl(sid, row.away_team_id);
+      const homeEm = getOpponentEmblemUrl(sid, row.home_team_id);
+      const linkUrl = getScheduleCardLinkUrl(row, sid);
+      const res = row.result || "";
+      let resClass = "yesterday-league-result";
+      if (res === "취소") resClass += " yesterday-league-result--cancel";
+      else if (res === "무") resClass += " yesterday-league-result--draw";
+      else if (res === "진행중") resClass += " yesterday-league-result--live";
+      else if (res === "원정승") resClass += " yesterday-league-result--away";
+      else if (res === "홈승") resClass += " yesterday-league-result--home";
+      const scoreText = res === "취소" ? "—" : `${row.away_score ?? "-"} : ${row.home_score ?? "-"}`;
+      const classes = ["yesterday-league-card"];
+      if (linkUrl) classes.push("yesterday-league-card--clickable");
+      const awayW = res === "원정승" ? " yesterday-league-side--winner" : "";
+      const homeW = res === "홈승" ? " yesterday-league-side--winner" : "";
+      return `
+      <article class="${classes.join(" ")}"${linkUrl ? ` data-link-url="${escapeHtml(linkUrl)}"` : ""}>
+        <div class="yesterday-league-card-top">
+          <div class="yesterday-league-side yesterday-league-side--away${awayW}">
+            ${awayEm ? `<img src="${escapeHtml(awayEm)}" alt="${escapeHtml(row.away_team)} 엠블럼" class="yesterday-league-emblem" loading="lazy" />` : ""}
+            <span class="yesterday-league-team-name">${escapeHtml(row.away_team)}</span>
+          </div>
+          <div class="yesterday-league-center">
+            <div class="yesterday-league-score">${escapeHtml(scoreText)}</div>
+            <strong class="${resClass}">${escapeHtml(res)}</strong>
+          </div>
+          <div class="yesterday-league-side yesterday-league-side--home${homeW}">
+            ${homeEm ? `<img src="${escapeHtml(homeEm)}" alt="${escapeHtml(row.home_team)} 엠블럼" class="yesterday-league-emblem" loading="lazy" />` : ""}
+            <span class="yesterday-league-team-name">${escapeHtml(row.home_team)}</span>
+          </div>
+        </div>
+        <div class="yesterday-league-foot">
+          <span>${escapeHtml(row.stadium || "")}</span>
+          ${row.game_time ? `<span class="yesterday-league-time">${escapeHtml(row.game_time)}</span>` : ""}
+        </div>
+      </article>
+    `;
+    })
+    .join("");
+  return `
+    <section class="yesterday-league-section">
+      <h2 class="cmp-title">전날 프로야구 경기 <span class="yesterday-league-date"> ${titleDate} </span></h2>
+      <p class="yesterday-league-note">경기 카드를 누르면 네이버 스포츠 중계·결과 페이지로 이동합니다.</p>
+      <div class="yesterday-league-grid">${cards}</div>
+    </section>
+  `;
+};
+
 const renderGame = (g, refreshedAt) => {
   if (!g) {
     container.innerHTML = "<p>가까운 일정에서 한화 이글스 경기 정보를 찾지 못했습니다.</p>";
@@ -949,6 +1158,7 @@ const renderGame = (g, refreshedAt) => {
     </div>
     ${renderWeatherSection(g)}
     ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary)}
+    ${renderYesterdayLeagueSection(g)}
     ${renderLineupSection(g)}
     ${renderRegisterMoveSection(g)}
     ${renderSeriesSection(g)}
@@ -957,6 +1167,7 @@ const renderGame = (g, refreshedAt) => {
     ${renderTeamRankings(g.team_rankings, g.team_rank_date)}
   `;
   bindScheduleCalendarEvents();
+  bindSunShadowEvents();
 };
 
 const shouldStartPolling = (g) => {
