@@ -106,24 +106,52 @@ const escapeHtml = (s) =>
 
 /** 그늘 참고 이미지를 원본 픽셀 크기로 새 창에서 연다. 새 창에서 이미지 클릭 시 창을 닫는다. */
 const openSunshadeImageOriginalViewer = (src) => {
-  const token = String(src || "").trim();
-  if (!token) return;
-  const absSrc = new URL(token, window.location.href).href;
-  const w = window.open("", "_blank", "noopener,noreferrer");
-  if (!w) return;
+  const raw = String(src || "").trim();
+  if (!raw) return;
+  let absSrc = "";
+  try {
+    absSrc = new URL(raw, window.location.href).href;
+  } catch (e) {
+    return;
+  }
+  const proto = new URL(absSrc).protocol;
+  if (proto !== "http:" && proto !== "https:" && proto !== "file:") return;
+
   const imgSrc = JSON.stringify(absSrc);
   const html =
     "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"/>" +
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>" +
     "<title>원본 이미지</title></head>" +
-    "<body style=\"margin:0;background:#0d0d0d;min-height:100vh;overflow:auto;display:flex;justify-content:center;align-items:flex-start;\">" +
-    "<img src=" +
+    "<body style=\"margin:0;background:#111;min-height:100vh;overflow:auto;display:flex;justify-content:center;align-items:flex-start;\">" +
+    "<div id=\"ld\" style=\"position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;color:#ddd;font:600 15px system-ui,sans-serif;z-index:1;\">이미지를 불러오는 중입니다.</div>" +
+    "<img id=\"p\" src=" +
     imgSrc +
-    " alt=\"\" style=\"display:block;cursor:pointer;max-width:none;width:auto;height:auto;\" onclick=\"window.close()\" title=\"클릭하면 창이 닫힙니다\" />" +
+    " alt=\"\" style=\"position:relative;z-index:2;display:none;cursor:pointer;max-width:none;width:auto;height:auto;\" " +
+    "onclick=\"window.close()\" title=\"클릭하면 창이 닫힙니다\" " +
+    "onload=\"this.style.display='block';var d=document.getElementById('ld');if(d)d.style.display='none';\" " +
+    "onerror=\"var d=document.getElementById('ld');if(d)d.textContent='이미지를 불러오지 못했습니다.';\" />" +
     "</body></html>";
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+
+  let blobUrl = "";
+  try {
+    blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+  } catch (e) {
+    return;
+  }
+  const w = window.open(blobUrl, "_blank", "noopener,noreferrer");
+  if (!w) {
+    URL.revokeObjectURL(blobUrl);
+    return;
+  }
+  const revokeLater = () => {
+    try {
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      /* ignore */
+    }
+  };
+  w.addEventListener("load", () => setTimeout(revokeLater, 8000), { once: true });
+  setTimeout(revokeLater, 120000);
   w.focus();
 };
 
@@ -153,7 +181,7 @@ const renderShadeSunMarkup = () => {
           <button type="button" class="sun-shade-back-btn" id="sun-shade-back-btn">← 구장 목록</button>
           <div class="sun-shade-image-wrap" id="sun-shade-image-wrap">
             <div class="sun-shade-loading" id="sun-shade-loading" hidden>이미지를 불러오는 중입니다.</div>
-            <img src="" alt="" class="sun-shade-image" id="sun-shade-image" loading="lazy" decoding="async" />
+            <img src="" alt="" class="sun-shade-image" id="sun-shade-image" loading="eager" decoding="async" />
           </div>
           <div class="sun-shade-caption" id="sun-shade-caption"></div>
         </div>
@@ -223,39 +251,53 @@ const bindSunShadowEvents = () => {
     const meta = SHADE_SUN_STADIUMS.find((r) => r.imageFile === file);
     const team = meta?.team || "";
     const stadium = meta?.stadium || "";
+
     sunShadeImgLoadToken += 1;
     const token = sunShadeImgLoadToken;
     imgEl.onload = null;
     imgEl.onerror = null;
+    imgEl.removeAttribute("src");
     imgEl.classList.remove("sun-shade-image--visible");
+
+    captionEl.textContent = `${team} · ${stadium}`;
+    panelList.hidden = true;
+    panelDetail.hidden = false;
+
     if (loadingEl) {
       loadingEl.hidden = false;
       loadingEl.textContent = "이미지를 불러오는 중입니다.";
     }
-    captionEl.textContent = `${team} · ${stadium}`;
-    panelList.hidden = true;
-    panelDetail.hidden = false;
-    imgEl.alt = `${team} ${stadium} 시간대별 태양·그늘 참고 이미지`;
-    imgEl.title = "클릭하면 원본 크기로 새 창에서 열립니다.";
-    imgEl.onload = () => {
+    if (loadingEl) void loadingEl.offsetHeight;
+
+    const nextSrc = `./sun/${encodeURIComponent(file)}`;
+    const applySrc = () => {
       if (token !== sunShadeImgLoadToken) return;
-      if (loadingEl) loadingEl.hidden = true;
-      imgEl.classList.add("sun-shade-image--visible");
-    };
-    imgEl.onerror = () => {
-      if (token !== sunShadeImgLoadToken) return;
-      if (loadingEl) {
-        loadingEl.hidden = false;
-        loadingEl.textContent = "이미지를 불러오지 못했습니다.";
+      imgEl.alt = `${team} ${stadium} 시간대별 태양·그늘 참고 이미지`;
+      imgEl.title = "클릭하면 원본 크기로 새 창에서 열립니다.";
+      imgEl.onload = () => {
+        if (token !== sunShadeImgLoadToken) return;
+        if (loadingEl) loadingEl.hidden = true;
+        imgEl.classList.add("sun-shade-image--visible");
+      };
+      imgEl.onerror = () => {
+        if (token !== sunShadeImgLoadToken) return;
+        if (loadingEl) {
+          loadingEl.hidden = false;
+          loadingEl.textContent = "이미지를 불러오지 못했습니다.";
+        }
+        imgEl.classList.remove("sun-shade-image--visible");
+        imgEl.removeAttribute("title");
+      };
+      imgEl.src = nextSrc;
+      if (imgEl.complete && imgEl.naturalWidth > 0 && token === sunShadeImgLoadToken) {
+        if (loadingEl) loadingEl.hidden = true;
+        imgEl.classList.add("sun-shade-image--visible");
       }
-      imgEl.classList.remove("sun-shade-image--visible");
-      imgEl.removeAttribute("title");
     };
-    imgEl.src = `./sun/${encodeURIComponent(file)}`;
-    if (imgEl.complete && imgEl.naturalWidth > 0 && token === sunShadeImgLoadToken) {
-      if (loadingEl) loadingEl.hidden = true;
-      imgEl.classList.add("sun-shade-image--visible");
-    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(applySrc);
+    });
   });
 
   imgEl.addEventListener("click", (e) => {
