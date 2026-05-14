@@ -434,6 +434,7 @@ body.sun-shade-open {
 }
 
 .sun-shade-image-wrap {
+  position: relative;
   border-radius: 8px;
   overflow: auto;
   max-height: min(76vh, 820px);
@@ -441,11 +442,37 @@ body.sun-shade-open {
   background: #f9f9f9;
 }
 
+.sun-shade-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px 14px;
+  background: #f0f0f0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  line-height: 1.45;
+}
+
+.sun-shade-loading[hidden] {
+  display: none !important;
+}
+
 .sun-shade-image {
   display: block;
   width: 100%;
   height: auto;
   vertical-align: top;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.sun-shade-image.sun-shade-image--visible {
+  opacity: 1;
 }
 
 .sun-shade-caption {

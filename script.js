@@ -9,6 +9,7 @@ let holidayCalendarData = null;
 /** 등/말소가 당일 비어 있을 때 직전에 표시했던 변동 내역을 유지한다. */
 let lastRegisterMovesSnapshot = null;
 let sunShadeEscapeListenerAttached = false;
+let sunShadeImgLoadToken = 0;
 
 if (!container) throw new Error("game-content container not found");
 
@@ -127,8 +128,9 @@ const renderShadeSunMarkup = () => {
         </div>
         <div class="sun-shade-panel sun-shade-panel--detail" id="sun-shade-panel-detail" hidden>
           <button type="button" class="sun-shade-back-btn" id="sun-shade-back-btn">← 구장 목록</button>
-          <div class="sun-shade-image-wrap">
-            <img src="" alt="" class="sun-shade-image" id="sun-shade-image" loading="lazy" />
+          <div class="sun-shade-image-wrap" id="sun-shade-image-wrap">
+            <div class="sun-shade-loading" id="sun-shade-loading" hidden>이미지를 불러오는 중입니다.</div>
+            <img src="" alt="" class="sun-shade-image" id="sun-shade-image" loading="lazy" decoding="async" />
           </div>
           <div class="sun-shade-caption" id="sun-shade-caption"></div>
         </div>
@@ -146,13 +148,26 @@ const bindSunShadowEvents = () => {
   const backBtn = document.getElementById("sun-shade-back-btn");
   const imgEl = document.getElementById("sun-shade-image");
   const captionEl = document.getElementById("sun-shade-caption");
+  const loadingEl = document.getElementById("sun-shade-loading");
   if (!backdrop || !openBtn || !panelList || !panelDetail || !imgEl || !captionEl) return;
+
+  const resetSunShadeImageUi = () => {
+    sunShadeImgLoadToken += 1;
+    imgEl.onload = null;
+    imgEl.onerror = null;
+    imgEl.removeAttribute("src");
+    imgEl.alt = "";
+    imgEl.classList.remove("sun-shade-image--visible");
+    if (loadingEl) {
+      loadingEl.hidden = true;
+      loadingEl.textContent = "이미지를 불러오는 중입니다.";
+    }
+  };
 
   const showList = () => {
     panelList.hidden = false;
     panelDetail.hidden = true;
-    imgEl.removeAttribute("src");
-    imgEl.alt = "";
+    resetSunShadeImageUi();
   };
 
   const openModal = () => {
@@ -184,11 +199,37 @@ const bindSunShadowEvents = () => {
     const meta = SHADE_SUN_STADIUMS.find((r) => r.imageFile === file);
     const team = meta?.team || "";
     const stadium = meta?.stadium || "";
-    imgEl.src = `./sun/${encodeURIComponent(file)}`;
-    imgEl.alt = `${team} ${stadium} 시간대별 태양·그늘 참고 이미지`;
+    sunShadeImgLoadToken += 1;
+    const token = sunShadeImgLoadToken;
+    imgEl.onload = null;
+    imgEl.onerror = null;
+    imgEl.classList.remove("sun-shade-image--visible");
+    if (loadingEl) {
+      loadingEl.hidden = false;
+      loadingEl.textContent = "이미지를 불러오는 중입니다.";
+    }
     captionEl.textContent = `${team} · ${stadium}`;
     panelList.hidden = true;
     panelDetail.hidden = false;
+    imgEl.alt = `${team} ${stadium} 시간대별 태양·그늘 참고 이미지`;
+    imgEl.onload = () => {
+      if (token !== sunShadeImgLoadToken) return;
+      if (loadingEl) loadingEl.hidden = true;
+      imgEl.classList.add("sun-shade-image--visible");
+    };
+    imgEl.onerror = () => {
+      if (token !== sunShadeImgLoadToken) return;
+      if (loadingEl) {
+        loadingEl.hidden = false;
+        loadingEl.textContent = "이미지를 불러오지 못했습니다.";
+      }
+      imgEl.classList.remove("sun-shade-image--visible");
+    };
+    imgEl.src = `./sun/${encodeURIComponent(file)}`;
+    if (imgEl.complete && imgEl.naturalWidth > 0 && token === sunShadeImgLoadToken) {
+      if (loadingEl) loadingEl.hidden = true;
+      imgEl.classList.add("sun-shade-image--visible");
+    }
   });
 
   if (!sunShadeEscapeListenerAttached) {
@@ -205,9 +246,18 @@ const bindSunShadowEvents = () => {
         if (detail && !detail.hidden) {
           if (list) list.hidden = false;
           detail.hidden = true;
+          sunShadeImgLoadToken += 1;
+          const loadEl = document.getElementById("sun-shade-loading");
+          if (loadEl) {
+            loadEl.hidden = true;
+            loadEl.textContent = "이미지를 불러오는 중입니다.";
+          }
           if (img) {
+            img.onload = null;
+            img.onerror = null;
             img.removeAttribute("src");
             img.alt = "";
+            img.classList.remove("sun-shade-image--visible");
           }
           return;
         }
@@ -215,9 +265,18 @@ const bindSunShadowEvents = () => {
         document.body.classList.remove("sun-shade-open");
         if (list) list.hidden = false;
         if (detail) detail.hidden = true;
+        sunShadeImgLoadToken += 1;
+        const loadEl2 = document.getElementById("sun-shade-loading");
+        if (loadEl2) {
+          loadEl2.hidden = true;
+          loadEl2.textContent = "이미지를 불러오는 중입니다.";
+        }
         if (img) {
+          img.onload = null;
+          img.onerror = null;
           img.removeAttribute("src");
           img.alt = "";
+          img.classList.remove("sun-shade-image--visible");
         }
       },
       true,
