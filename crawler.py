@@ -2656,13 +2656,12 @@ def _serialize_yesterday_league_game_row(
     }
 
 
-def _fetch_yesterday_league_scoreboard(today: date) -> tuple[str, list[Dict[str, Any]]]:
-    """한국시간 기준 전날 KBO 전 경기(종료·진행·취소) 요약."""
-    yesterday = today - timedelta(days=1)
-    ymd = yesterday.isoformat()
-    season_fallback = str(yesterday.year)
+def _fetch_league_scoreboard_for_date(target: date) -> tuple[str, list[Dict[str, Any]]]:
+    """지정일 KBO 전 경기(종료·진행·취소) 요약."""
+    ymd = target.isoformat()
+    season_fallback = str(target.year)
     try:
-        raw_games = _fetch_games(yesterday)
+        raw_games = _fetch_games(target)
     except Exception:
         return ymd, []
     rows: list[Dict[str, Any]] = []
@@ -2682,6 +2681,28 @@ def _fetch_yesterday_league_scoreboard(today: date) -> tuple[str, list[Dict[str,
         )
     rows.sort(key=lambda r: (str(r.get("game_time", "")), str(r.get("game_id", ""))))
     return ymd, rows
+
+
+def _should_show_today_league_scoreboard(today: date) -> bool:
+    """
+    한화 당일 경기가 아직 예정(1)이면 어제 전체 결과를, 시작·종료 이후면 당일 결과를 보여준다.
+    """
+    game = _hanwha_game_on_calendar_day(today)
+    if not game:
+        return False
+    state = str(game.get("GAME_STATE_SC", "") or "").strip()
+    if state == "1":
+        return False
+    if _is_live_game(game) or _is_final_game(game):
+        return True
+    if _is_finished_game(game):
+        return True
+    return False
+
+
+def _resolve_league_results_scoreboard(today: date) -> tuple[str, list[Dict[str, Any]]]:
+    target = today if _should_show_today_league_scoreboard(today) else today - timedelta(days=1)
+    return _fetch_league_scoreboard_for_date(target)
 
 
 def _get_hanwha_season_schedule_cached(season_id: str) -> list[Dict[str, Any]]:
@@ -2704,7 +2725,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     latest_news = _fetch_latest_hanwha_news(limit=5)
     register_moves = _fetch_hanwha_register_moves()
     today = _today_kst()
-    yesterday_ymd, yesterday_league_games = _fetch_yesterday_league_scoreboard(today)
+    league_results_ymd, league_results_games = _resolve_league_results_scoreboard(today)
 
     for offset in range(max_days_ahead + 1):
         target = today + timedelta(days=offset)
@@ -2855,7 +2876,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,
                 "season_schedule": season_schedule,
-                "yesterday_league_date": yesterday_ymd,
-                "yesterday_league_games": yesterday_league_games,
+                "league_results_date": league_results_ymd,
+                "league_results_games": league_results_games,
             }
     return None

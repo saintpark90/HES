@@ -1126,10 +1126,14 @@ const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
   return `${KBO_EMBLEM_BASE_URL}/${sid}/emblem_${tid}.png`;
 };
 
-const renderYesterdayLeagueSection = (g) => {
-  const raw = Array.isArray(g?.yesterday_league_games) ? g.yesterday_league_games : [];
+const renderLeagueResultsSection = (g) => {
+  const raw = Array.isArray(g?.league_results_games)
+    ? g.league_results_games
+    : Array.isArray(g?.yesterday_league_games)
+      ? g.yesterday_league_games
+      : [];
   if (raw.length === 0) return "";
-  const ymd = g.yesterday_league_date || "";
+  const ymd = g.league_results_date || g.yesterday_league_date || "";
   const dt = parseYmdAsLocalDate(ymd);
   const titleDate = dt
     ? `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`
@@ -1184,7 +1188,7 @@ const renderYesterdayLeagueSection = (g) => {
     .join("");
   return `
     <section class="yesterday-league-section">
-      <h2 class="cmp-title">전날 프로야구 경기 <span class="yesterday-league-date"> ${titleDate} </span></h2>
+      <h2 class="cmp-title">경기 결과 <span class="yesterday-league-date">${titleDate}</span></h2>
       <p class="yesterday-league-note">경기 카드를 누르면 네이버 스포츠 중계·결과 페이지로 이동합니다.</p>
       <div class="yesterday-league-grid">${cards}</div>
     </section>
@@ -1231,7 +1235,7 @@ const renderGame = (g, refreshedAt) => {
     </div>
     ${renderWeatherSection(g)}
     ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary)}
-    ${renderYesterdayLeagueSection(g)}
+    ${renderLeagueResultsSection(g)}
     ${renderLineupSection(g)}
     ${renderRegisterMoveSection(g)}
     ${renderSeriesSection(g)}
