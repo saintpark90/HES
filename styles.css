@@ -1127,8 +1127,8 @@ body.sun-shade-open {
 }
 
 .sched-dot-home-border { background: transparent; border: 2px solid #ff8a3d; box-sizing: border-box; }
-.sched-dot-win { background: #e3edff; border: 1px solid #ededed; box-sizing: border-box; }
-.sched-dot-loss { background: #ffe3d8; border: 1px solid #ededed; box-sizing: border-box; }
+.sched-dot-win { background: #c6dbff; border: 1px solid #ededed; box-sizing: border-box; }
+.sched-dot-loss { background: #ffd1be; border: 1px solid #ededed; box-sizing: border-box; }
 
 .sched-summary-wrap {
   margin-top: 10px;
