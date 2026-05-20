@@ -45,6 +45,20 @@ _HANWHA_SEASON_SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
 _HANWHA_SEASON_SCHEDULE_CACHE_TTL_SEC = 60 * 30
 
 
+def _kbo_api_headers() -> Dict[str, str]:
+    """KBO ws/*.asmx endpoints return an HTML error page without browser-like headers."""
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.koreabaseball.com/",
+        "Origin": "https://www.koreabaseball.com",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    }
+
+
 def _today_kst() -> date:
     """KBO schedules and Korean 'today' for UI must use Asia/Seoul, not server local/UTC date."""
     return datetime.now(KST).date()
@@ -328,9 +342,14 @@ def _fetch_games(target_date: date) -> list[Dict[str, Any]]:
         "srId": SERIES_IDS,
         "date": target_date.strftime("%Y%m%d"),
     }
-    response = requests.post(KBO_GAME_LIST_URL, data=payload, timeout=10)
+    response = _http_post_with_retries(
+        KBO_GAME_LIST_URL,
+        data=payload,
+        headers=_kbo_api_headers(),
+        timeout=12,
+    )
     response.raise_for_status()
-    body = json.loads(response.content.decode("utf-8-sig"))
+    body = _loads_kbo_json_response(response, "GetKboGameList")
     return body.get("game", [])
 
 
@@ -727,6 +746,42 @@ def _http_get_with_retries(
     if last_error:
         raise last_error
     raise RuntimeError("unreachable retry state")
+
+
+def _http_post_with_retries(
+    url: str,
+    *,
+    data: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: int = 10,
+    retries: int = 3,
+) -> requests.Response:
+    last_error: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            return requests.post(
+                url,
+                data=data,
+                headers=headers,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(0.5 * (attempt + 1))
+    if last_error:
+        raise last_error
+    raise RuntimeError("unreachable retry state")
+
+
+def _loads_kbo_json_response(response: requests.Response, endpoint: str) -> Dict[str, Any]:
+    text = response.content.decode("utf-8-sig").lstrip()
+    if not text.startswith("{"):
+        snippet = text[:120].replace("\n", " ")
+        raise ValueError(
+            f"{endpoint} returned non-JSON (HTTP {response.status_code}): {snippet!r}"
+        )
+    return json.loads(text)
 
 
 _TITLE_DATE_PAREN = re.compile(r"(\([0-9]{1,2}\.[0-9]{1,2}\))\s*$")
