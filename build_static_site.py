@@ -49,6 +49,34 @@ def _is_missing_starter_name(name: str) -> bool:
     return token in {"", "-", "미정", "TBD", "예정"}
 
 
+def _is_incomplete_starter_stats(stats: object) -> bool:
+    """CI에서 상세 페이지 크롤 실패 시 {'war': '-'}만 남는 경우를 불완전으로 본다."""
+    if not isinstance(stats, dict):
+        return True
+    core_keys = ("era", "wins", "losses", "games", "whip", "birth_date", "age")
+    meaningful = [
+        str(stats.get(key) or "").strip()
+        for key in core_keys
+        if str(stats.get(key) or "").strip() not in {"", "-"}
+    ]
+    return len(meaningful) < 2
+
+
+def _merge_starter_stats_dict(current: object, previous: object) -> dict:
+    if not isinstance(previous, dict):
+        return dict(current) if isinstance(current, dict) else {}
+    if not isinstance(current, dict):
+        current = {}
+    if _is_incomplete_starter_stats(current) and not _is_incomplete_starter_stats(previous):
+        return dict(previous)
+    merged = dict(current)
+    for key, value in previous.items():
+        cur = str(merged.get(key) or "").strip()
+        if cur in {"", "-"} and str(value or "").strip() not in {"", "-"}:
+            merged[key] = value
+    return merged
+
+
 def _merge_starter_fallbacks(current_info: dict, previous_info: dict) -> dict:
     if not current_info:
         return current_info
@@ -79,11 +107,19 @@ def _merge_starter_fallbacks(current_info: dict, previous_info: dict) -> dict:
         if not str(merged.get(img_key) or "").strip() and str(previous_info.get(img_key) or "").strip():
             merged[img_key] = previous_info.get(img_key)
 
-        current_stats = merged.get(stats_key)
-        prev_stats = previous_info.get(stats_key)
-        if isinstance(prev_stats, dict):
-            if not isinstance(current_stats, dict) or not any(str(v).strip() for v in current_stats.values()):
-                merged[stats_key] = prev_stats
+        cur_id = str(merged.get(id_key) or "").strip()
+        prev_id = str(previous_info.get(id_key) or "").strip()
+        same_pitcher = bool(cur_id and prev_id and cur_id == prev_id)
+        same_name = (
+            str(merged.get(f"{side}_starter") or "").strip()
+            == str(previous_info.get(f"{side}_starter") or "").strip()
+            and not _is_missing_starter_name(str(merged.get(f"{side}_starter") or ""))
+        )
+        if same_pitcher or same_name:
+            merged[stats_key] = _merge_starter_stats_dict(
+                merged.get(stats_key),
+                previous_info.get(stats_key),
+            )
 
     return merged
 

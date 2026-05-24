@@ -2262,9 +2262,20 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
     if not player_id:
         return {}
 
+    headers = {
+        **_kbo_api_headers(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
     try:
-        response = requests.get(PITCHER_DETAIL_URL, params={"playerId": player_id}, timeout=10)
+        response = _http_get_with_retries(
+            PITCHER_DETAIL_URL,
+            params={"playerId": player_id},
+            headers=headers,
+            timeout=14,
+            retries=3,
+        )
         response.raise_for_status()
+        response.encoding = "utf-8"
         html = response.text
     except Exception:
         return {}
