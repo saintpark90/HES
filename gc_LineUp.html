@@ -1,0 +1,193 @@
+
+					
+<div class="tab-depth2">
+	<ul class="tab" id="tabPreview">
+		
+	</ul>
+</div>
+
+<h5 class="sub-tit">��쇱�몄�� 遺����</h5>
+<div class="sub-script row mb10">
+	<p class="section-left fb f16" id="txtLineUp">��쇱�몄�� 諛���� �����쇰�� 理�洹� ��쇱�몄�� 湲곗�����������.</p>
+	
+</div>
+
+<div class="graph-area">
+	<div class="graph-tit">WAR ��⑹��</div>
+	<div class="team-away"><span class="logo" id="awayTeam"></div>
+    <div class="team-home"><span class="logo" id="homeTeam"></div>
+	<ul class="lineup-data">
+		<li>
+			<div class="graph away"><span id="txtLeftTableSetter"></span><span class="send" id="txtAwayTableSetter"></span></div>
+			<span class="tit">�����대����명��</span>
+			<div class="graph home"><span class="send" id="txtHomeTableSetter"></span><span id="txtRightTableSetter"></span></div>
+		</li>
+		<li>
+			<div class="graph away"><span id="txtLeftCleanUp"></span><span class="send" id="txtAwayCleanUp"></span></div>
+			<span class="tit">以���ы�����</span>
+			<div class="graph home"><span class="send" id="txtHomeCleanUp"></span><span id="txtRightCleanUp"></span></div>
+		</li>
+		<li>
+			<div class="graph away"><span id="txtLeftBottom"></span><span class="send" id="txtAwayBottom"></span></div>
+			<span class="tit">������������</span>
+			<div class="graph home"><span class="send" id="txtHomeBottom"></span><span id="txtRightBottom"></span></div>
+		</li>
+	</ul>
+</div>
+
+<div class="row mt50">
+	<div class="section-left tbl-type04 w48p">
+		<h6 class="tit-team" id="txtAwayTeam"></h6>
+		<table class="tbl" id="tblAwayLineUp">
+			<thead>
+				<tr>
+					<th>������</th>
+					<th>��ъ�����</th>
+					<th>������紐�</th>
+					<th>WAR</th>
+				</tr>
+			</thead>
+		</table>
+	</div>
+	<div class="section-right tbl-type04 w48p">
+		<h6 class="tit-team" id="txtHomeTeam"></h6>
+		<table class="tbl" id="tblHomeLineUp">
+			<thead>
+				<tr>
+					<th>������</th>
+					<th>��ъ�����</th>
+					<th>������紐�</th>
+					<th>WAR</th>
+				</tr>
+			</thead>
+		</table>
+	</div>
+</div>
+
+<script type="text/javascript">
+    var group = "SEASON";
+
+    $(document).ready(function () {
+        getLineUpTableGrid();   // ��쇱�몄�� 
+    });
+
+    // ��쇱�몄�� (異����������吏����, 由ш렇, ���由ъ�� request)
+    function getLineUpTableGrid() {
+        var gameId = $(".game-list-n > li.on").attr("g_id");
+        var leId = $(".game-list-n > li.on").attr("le_id");
+        var srId = $(".game-list-n > li.on").attr("sr_id");
+        var seasonId = $(".game-list-n > li.on").attr("season");
+
+        var request = $.ajax({
+            type: "post"
+            , url: "/ws/Schedule.asmx/GetLineUpAnalysis"
+            , dataType: "json"
+            , data: {
+                leId: leId
+                , srId: srId
+                , seasonId: seasonId
+                , gameId: gameId
+            }
+            , async: false
+        });
+
+        request.done(function (data) {
+
+            if (data[0][0].LINEUP_CK == false) {
+                $("#txtLineUp").text("��쇱�몄�� 諛���� �����쇰�� 理�洹� ��쇱�몄�� 湲곗�����������.");
+            } else {
+                $("#txtLineUp").text("湲���� ��쇱�몄�� 湲곗�����������.");
+            }
+            
+            if (data[2][0] == undefined || data[1][0] == undefined)
+            {
+                $(".graph-area").text("��곗�댄�곌�� �����듬�����.");
+                $(".lineup-data, #txtLineUp").hide();
+            }
+
+            if (data[2][0] != undefined)
+            {
+                $("#txtLeftTableSetter").html(String.format("{0}&nbsp;&nbsp;", data[2][0].HITTER_12_WAR_RT));
+                $("#txtLeftCleanUp").html(String.format("{0}&nbsp;&nbsp;", data[2][0].HITTER_35_WAR_RT));
+                $("#txtLeftBottom").html(String.format("{0}&nbsp;&nbsp;", data[2][0].HITTER_69_WAR_RT));
+                $("#txtAwayTableSetter").css("width", String.format("{0}%", getMaxWarRt(data[2][0].HITTER_12_WAR_RT * 3)));
+                $("#txtAwayCleanUp").css("width", String.format("{0}%", getMaxWarRt(data[2][0].HITTER_35_WAR_RT * 3)));
+                $("#txtAwayBottom").css("width", String.format("{0}%", getMaxWarRt(data[2][0].HITTER_69_WAR_RT * 3)));
+
+                $("#txtLeftTableSetter").addClass(getAwayCompareData(parseFloat(data[2][0].HITTER_12_WAR_RT), parseFloat(data[1][0].HITTER_12_WAR_RT)));
+                $("#txtLeftCleanUp").addClass(getAwayCompareData(parseFloat(data[2][0].HITTER_35_WAR_RT), parseFloat(data[1][0].HITTER_35_WAR_RT)));
+                $("#txtLeftBottom").addClass(getAwayCompareData(parseFloat(data[2][0].HITTER_69_WAR_RT), parseFloat(data[1][0].HITTER_69_WAR_RT)));
+
+                //$("#awayTeam").html(String.format("<span class='logo'><img src='//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/emblem/emblem_{0}.png' alt='{1}' /></span>{1}", data[2][0].T_ID, data[2][0].T_NM))
+                //$("#txtAwayTeam").html(String.format("<span class='logo'><img src='//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/emblem/initial_{0}_s.png' alt='{1}' /></span>{1}", data[2][0].T_ID, data[2][0].T_NM))
+                $("#awayTeam").html(String.format("<span class='logo'><img src='{0}' alt='{1}' /></span>{1}", data[2][0].T_EMBLEM_LK, data[2][0].T_NM));
+                $("#txtAwayTeam").html(String.format("<span class='logo'><img src='{0}' alt='{1}' /></span>{1}", data[2][0].T_INITIAL_LK, data[2][0].T_NM));
+            }
+
+            if (data[1][0] != undefined)
+            {
+                $("#txtRightTableSetter").html(String.format("&nbsp;&nbsp;{0}", data[1][0].HITTER_12_WAR_RT));
+                $("#txtRightCleanUp").html(String.format("&nbsp;&nbsp;{0}", data[1][0].HITTER_35_WAR_RT));
+                $("#txtRightBottom").html(String.format("&nbsp;&nbsp;{0}", data[1][0].HITTER_69_WAR_RT));
+                $("#txtHomeTableSetter").css("width", String.format("{0}%", getMaxWarRt(data[1][0].HITTER_12_WAR_RT * 3)));
+                $("#txtHomeCleanUp").css("width", String.format("{0}%", getMaxWarRt(data[1][0].HITTER_35_WAR_RT * 3)));
+                $("#txtHomeBottom").css("width", String.format("{0}%", getMaxWarRt(data[1][0].HITTER_69_WAR_RT * 3)));
+
+                $("#txtRightTableSetter").addClass(getHomeCompare(parseFloat(data[2][0].HITTER_12_WAR_RT), parseFloat(data[1][0].HITTER_12_WAR_RT)));
+                $("#txtRightCleanUp").addClass(getHomeCompare(parseFloat(data[2][0].HITTER_35_WAR_RT), parseFloat(data[1][0].HITTER_35_WAR_RT)));
+                $("#txtRightBottom").addClass(getHomeCompare(parseFloat(data[2][0].HITTER_69_WAR_RT), parseFloat(data[1][0].HITTER_69_WAR_RT)));
+
+                //$("#homeTeam").html(String.format("<span class='logo'><img src='//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/emblem/emblem_{0}.png' alt='{1}' /></span>{1}", data[1][0].T_ID, data[1][0].T_NM))
+                //$("#txtHomeTeam").html(String.format("<span class='logo'><img src='//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/emblem/initial_{0}_s.png' alt='{1}' /></span>{1}", data[1][0].T_ID, data[1][0].T_NM))
+                $("#homeTeam").html(String.format("<span class='logo'><img src='{0}' alt='{1}' /></span>{1}", data[1][0].T_EMBLEM_LK, data[1][0].T_NM));
+                $("#txtHomeTeam").html(String.format("<span class='logo'><img src='{0}' alt='{1}' /></span>{1}", data[1][0].T_INITIAL_LK, data[1][0].T_NM));
+            }
+            
+            $("#tblAwayLineUp").S2iGridTable(
+            {
+                rows: $.parseJSON(data[4][0]).rows
+            });
+
+            $("#tblHomeLineUp").S2iGridTable(
+            {
+                rows: $.parseJSON(data[3][0]).rows
+            });
+
+            //var awayTeamId = gameId.substring(8, 10);
+            //var homeTeamId = gameId.substring(10, 12);
+        });
+    }
+
+    // max媛� 怨����
+    function getMaxWarRt(hitterWarRt) {
+        var warRt = 80;
+
+        if (warRt > 75) {
+            warRt = hitterWarRt;
+        }
+
+        return warRt;
+    }
+
+    // ������ class
+    function getAwayCompareData(awayData, homeData) {
+        var result = "";
+        if (awayData > homeData) {
+            result = "win";
+        }
+        else {
+        }
+        return result;
+    }
+
+    // ��� class
+    function getHomeCompare(awayData, homeData) {
+        var result = "";
+        if (awayData < homeData) {
+            result = "win";
+        }
+        else {
+        }
+        return result;
+    }
+</script>

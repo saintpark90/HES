@@ -1,0 +1,165 @@
+
+	
+<div class="tab-depth2">
+	<ul class="tab" id="tabPreview">
+		
+	</ul>
+</div>
+
+<h5 class="sub-tit">��� �����λ��援�</h5>
+					
+<div class="tab-depth3 mb0">
+	<ul class="tab">
+		<li class="on"><a href="#none" attr-value="SEASON">���利�</a>|</li>
+		<li><a href="#none" attr-value="HOMEAWAY">���/������</a>|</li>
+		<li><a href="#none" attr-value="VS">留����寃�</a></li>
+	</ul>
+</div>
+<div class="sub-script row mb5">
+	
+</div>
+					
+<div class="tbl-type05 mb50">
+	<table class="tbl" id="tblRecord" summary="留����寃� ��깆�� ���(留����寃� ��깆��, ���利�, 理�洹�5寃쎄린, ��� ���洹����梨����, ��� ������, ���洹�������, ���洹���ㅼ��)">
+		<caption>��쇱�몄�� 遺���� ���</caption>
+		<colgroup>
+			<col width="16%" />
+			<col width="13%" />
+			<col width="13%" />
+			<col width="13%" />
+			<col width="13%" />
+			<col width="13%" />
+			<col width="13%" />
+		</colgroup>
+		<thead>
+			<tr>
+				<th id="txtGroup">留����寃� ��깆��</th>
+				<th>���利�</th>
+				<th>理�洹�5寃쎄린</th>
+				<th>���洹����梨����</th>
+				<th>������</th>
+				<th>���洹�������</th>
+				<th>���洹���ㅼ��</th>
+			</tr>
+		</thead>										
+	</table>
+</div>
+
+<h6 class="mb10">留����寃� ��ㅽ�������댁��</h6>
+					
+<div class="tbl-prev-keyplayer">
+	<table class="tbl" id="tblKeyPlayer" summary="留����寃� ��ㅽ�������댁��">
+		<caption>留����寃� ��ㅽ�������댁��</caption>
+		<colgroup>
+			<col width="15%" />
+			<col width="8%" />
+			<col width="35%" />
+			<col width="8%" />
+			<col width="35%" />
+		</colgroup>
+	</table>
+</div>
+
+<script type="text/javascript">
+    var group = "SEASON";
+
+    $(document).ready(function () {
+        getGroupTitle();    // �����댄��
+        getTeamTableGrid(); // ��� 湲곕��鍮�援�
+        getKeyPlayerTableGrid();    // ��ㅽ�������댁��
+    });
+
+    // 援щ��������
+    $(".tab-depth3 > ul > li").click(function (e) {
+        e.preventDefault();
+        $(this).addClass("on").siblings().removeClass("on");
+        group = $(this).find("> a").attr("attr-value");
+
+        getGroupTitle();    // �����댄��
+        getTeamTableGrid(); // ��� 湲곕��鍮�援�
+    });
+
+    // ��� 湲곕��鍮�援� (異����������吏����, 由ш렇, ���由ъ�� request)
+    function getTeamTableGrid() {
+        var gameId = $(".game-list-n > li.on").attr("g_id");
+        var leId = $(".game-list-n > li.on").attr("le_id");
+        var srId = $(".game-list-n > li.on").attr("sr_id");
+        var seasonId = $(".game-list-n > li.on").attr("season");
+
+        if (srId == 4 || srId == 3 || srId == 5 || srId == 7) { // ��ъ�ㅽ�몄��利� : ���洹����利� 湲곕�� ���異�
+            srId = 0;
+        }
+
+        var request = $.ajax({
+            type: "post"
+            , url: "/ws/Schedule.asmx/GetTeamRecord"
+            , dataType: "json"
+            , data: {
+                leId: leId
+                , srId: srId
+                , seasonId: seasonId
+                , gameId: gameId
+                , groupSc: group
+            }
+            , async: false
+        });
+
+        request.done(function (data) {
+            $("#tblRecord").S2iGridTable(
+            {
+                rows: data.rows
+            });
+        });
+    }
+
+    // ��ㅽ�������댁��
+    function getKeyPlayerTableGrid() {
+        var leId = $(".game-list-n > li.on").attr("le_id");
+        var srId = $(".game-list-n > li.on").attr("sr_id");
+        var seasonId = $(".game-list-n > li.on").attr("season");
+        var awayTeamId = $(".game-list-n > li.on").attr("away_id");
+        var homeTeamId = $(".game-list-n > li.on").attr("home_id");
+        var vsGameCn = $(".game-list-n > li.on").attr("vs_game_cn");
+
+        if (srId == 4 || srId == 3 || srId == 5 || srId == 7) { // ���由ъ�� 1李⑥����� ���洹����利� ��ㅽ�������댁��, 2李⑥��遺���곕�� ��ъ�ㅽ�몄��利� ��ㅽ�������댁�� ���異�
+            if (vsGameCn == 1) {
+                srId = 0;
+            }
+        }
+
+        var request = $.ajax({
+            type: "post"
+            , url: "/ws/Schedule.asmx/GetTeamKeyPlayer"
+            , dataType: "json"
+            , data: {
+                leId: leId
+                , srId: srId
+                , seasonId: seasonId
+                , awayTeamId: awayTeamId
+                , homeTeamId: homeTeamId
+            }
+            , async: false
+        });
+
+        request.done(function (data) {
+            $("#tblKeyPlayer").S2iGridTable(
+            {
+                header: data.headers
+                ,rows: data.rows
+            });
+        });
+    }
+
+    // �����댄��
+    function getGroupTitle() {
+        if (group == "SEASON") {
+            $("#txtGroup").text("���利� ��깆��");
+        }
+        else if (group == "HOMEAWAY") {
+            $("#txtGroup").text("���/������ ��깆��");
+        }
+        else {
+            $("#txtGroup").text("留����寃� ��깆��");
+        }
+    }
+</script>

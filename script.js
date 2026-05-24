@@ -1126,6 +1126,14 @@ const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
   return `${KBO_EMBLEM_BASE_URL}/${sid}/emblem_${tid}.png`;
 };
 
+const formatLeagueResultLabel = (row) => {
+  const res = String(row?.result || "").trim();
+  if (res === "취소" || res === "무" || res === "진행중") return res;
+  if (res === "원정승") return `${row.away_team || "원정"} 승`;
+  if (res === "홈승") return `${row.home_team || "홈"} 승`;
+  return res;
+};
+
 const renderLeagueResultsSection = (g) => {
   const raw = Array.isArray(g?.league_results_games)
     ? g.league_results_games
@@ -1151,6 +1159,7 @@ const renderLeagueResultsSection = (g) => {
       const homeEm = getOpponentEmblemUrl(sid, row.home_team_id);
       const linkUrl = getScheduleCardLinkUrl(row, sid);
       const res = row.result || "";
+      const resLabel = formatLeagueResultLabel(row);
       let resClass = "yesterday-league-result";
       if (res === "취소") resClass += " yesterday-league-result--cancel";
       else if (res === "무") resClass += " yesterday-league-result--draw";
@@ -1171,7 +1180,7 @@ const renderLeagueResultsSection = (g) => {
           </div>
           <div class="yesterday-league-center">
             <div class="yesterday-league-score">${escapeHtml(scoreText)}</div>
-            <strong class="${resClass}">${escapeHtml(res)}</strong>
+            <strong class="${resClass}">${escapeHtml(resLabel)}</strong>
           </div>
           <div class="yesterday-league-side yesterday-league-side--home${homeW}">
             ${homeEm ? `<img src="${escapeHtml(homeEm)}" alt="${escapeHtml(row.home_team)} 엠블럼" class="yesterday-league-emblem" loading="lazy" />` : ""}
@@ -1217,14 +1226,14 @@ const renderGame = (g, refreshedAt) => {
       <div class="game-pitcher-cols sub">
         <div class="pitcher-grid">
         ${renderPitcherCard(
-          "원정팀 선발",
+          `${g.away_team || "원정"} 선발`,
           g.away_starter,
           g.away_starter_image,
           g.away_starter_stats,
           g.team_comparison?.away_emblem,
         )}
         ${renderPitcherCard(
-          "홈팀 선발",
+          `${g.home_team || "홈"} 선발`,
           g.home_starter,
           g.home_starter_image,
           g.home_starter_stats,

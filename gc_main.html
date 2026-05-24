@@ -1,0 +1,1295 @@
+
+
+<!DOCTYPE html>
+<html lang="ko">
+<head><title>
+	寃������쇳�� | ��쇱��/寃곌낵 | KBO
+</title><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /><meta http-equiv="Content-Script-Type" content="text/javascript" /><meta http-equiv="Content-Style-Type" content="text/css" /><meta http-equiv="X-UA-Compatible" content="IE=edge, Chrome" /><meta name="title" content="KBO" /><meta name="author" content="��ㅽ�ъ����ъ�����" /><meta name="keywords" content="KBO, ���援���쇨뎄���������, ���濡���쇨뎄, KBO 由ш렇, ��⑥����ㅻ━洹�, ���濡���쇨뎄������, ���濡���쇨뎄 ��쇱��" /><meta name="viewport" content="width=1200" />
+    <!-- OG -->
+    <meta property="og:type" content="website" /><meta property="og:title" content="KBO ��������댁��" /><meta property="og:description" content="KBO, ���援���쇨뎄���������, ���濡���쇨뎄, KBO 由ш렇, ��⑥����ㅻ━洹�, ���濡���쇨뎄������, ���濡���쇨뎄 ��쇱��" /><meta property="og:image" content="https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/open_graph_kbo_2022.png" /><meta property="og:url" content="https://www.koreabaseball.com/" />
+
+	<link rel="shortcut icon" type="image/x-icon" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/favicon.ico" />
+    <link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/font.min.css?version=202604011" crossorigin="anonymous"/>
+	<link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/reset.min.css?version=202604011" />
+	<link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/common.min.css?version=202604011" />
+	<link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/layout.min.css?version=202604011" />
+	<link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/contents.min.css?version=202604011" />
+    <link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/jquery-ui.min.css?version=202604011" />
+    <link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/jquery-ui-theme.min.css?version=202604011" />
+	<link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/jquery.bxslider.min.css?version=202604011" />
+
+	<script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery-1.12.4.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery-migrate-1.1.1.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery-ui.min.js?version=20260330"></script>
+	<script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery.bxslider.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery.ui.datepicker-ko.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/S2i.Common-1.0.1.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/S2i.Paging-1.0.8.min.js?version=20260330"></script>
+	<script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/common.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/S2i.MakeTable-1.0.3.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/bTogether.min.js?version=20260330"></script>
+    
+	<!���[if lt IE 9]>
+		<script src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/html5shiv.min.js?version=20260330"></script>
+	<![endif]���>
+	<!-- Google Tag Manager -->
+	<script>
+        $.ajaxSetup({
+            timeout: 10000 // ������ ������������ ��ㅼ��
+        });
+
+        $(document).ajaxError(function (event, jqxhr, settings, thrownError) {
+			// ��몄�� 吏���� 10珥�
+            if (thrownError === 'timeout') {
+                console.warn(`timeout: ${settings.url}`);
+				if(settings.url == "https://www.kborc.com/getKboRCList.ajax"){
+					$("#KBOMovie").remove();
+				}
+				if(settings.url == "https://www.kborc.com/getKboRCList2.ajax"){
+					$("#KBOCheckedSwing").remove();
+				}
+
+            } 
+			// ��몄�� ��ㅻ��
+			else {
+                console.warn(`error: ${settings.url}`, thrownError);
+				if(settings.url == "https://www.kborc.com/getKboRCList.ajax"){
+					$("#KBOMovie").remove();
+				}
+				if(settings.url == "https://www.kborc.com/getKboRCList2.ajax"){
+					$("#KBOCheckedSwing").remove();
+				}
+            }
+        });
+
+
+		(function (w, d, s, l, i) {
+			w[l] = w[l] || []; w[l].push({
+				'gtm.start':
+					new Date().getTime(), event: 'gtm.js'
+			}); var f = d.getElementsByTagName(s)[0],
+				j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : ''; j.async = true; j.src =
+					'https://www.googletagmanager.com/gtm.js?id=' + i + dl; f.parentNode.insertBefore(j, f);
+		})(window, document, 'script', 'dataLayer', 'GTM-K3BL64Q');
+
+        $(document).ready(function () {
+            var jbOffset = $('.lnb-wrap').offset();
+            $(window).scroll(function () {
+                if ($(document).scrollTop() > jbOffset.top) {
+                    $('.lnb-wrap').addClass('fixed');
+                }
+                else {
+                    $('.lnb-wrap').removeClass('fixed');
+                }
+            });
+        });
+    </script>
+	<!-- End Google Tag Manager -->
+    
+    <link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/sub.min.css?version=202604011" />
+    
+	<link type="text/css" rel="stylesheet" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/schedule.min.css?version=202604011"/>
+	<link type="text/css" rel="stylesheet" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/games.min.css?version=202604011"/>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery.ba-throttle-debounce.min.js?version=20260330"></script>
+    
+    <link rel="stylesheet" type="text/css" href="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/css/jquery.mCustomScrollbar.min.css?version=202604011">
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/S2i.GameList-1.0.0.min.js?version=20260330"></script>
+    
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/S2i.AjaxHtml-1.0.0.min.js?version=20260330"></script>
+    <script type="text/javascript" charset="utf-8" src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/min/js/jquery.mCustomScrollbar.min.js?version=20260330"></script>   
+
+
+</head>
+<body>
+	<!-- Google Tag Manager (noscript) -->
+	<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-K3BL64Q"
+	height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+	<!-- End Google Tag Manager (noscript) -->
+    <form method="post" action="./Main.aspx?leId=1&amp;srId=0&amp;gameId=20260422HHLG0" id="mainForm">
+<div class="aspNetHidden">
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="/wEPDwUJODUzODMxODAxZGTFsiJbCgbU5BVuJ8P73vbb4pD1pQ==" />
+</div>
+
+<div class="aspNetHidden">
+
+	<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="FB57D787" />
+</div>
+	    <!-- wrap -->
+	    <div id="wrap">
+		    <!-- header -->
+		    <header>	
+			    <div id="gnb" class="bgf3">
+				    <div class="gnb-wrap">
+						
+						
+					    <ul class="menu">
+                            
+						    <li><a href="/Member/Login.aspx">濡�洹몄��</a></li>
+                            <li><a href="/Member/Join/Accessterms.aspx">������媛����</a></li>
+                            
+						    <li><a href="http://eng.koreabaseball.com/">ENGLISH</a></li>						
+					    </ul>
+					    <div class="search-area">
+						    <div class="search-box">
+							    <input class="ipt-search" type="text" id="txtTopPlayerWord" placeholder="������ 寃�������湲�" />
+							    <a href="#none;" id="btnTopPlayerSearch" class="btn-search"><img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/btn_search.png" alt="寃����" /></a>
+						    </div>
+						    <div id="player_search_area" class="search-result">
+							    <!-- <p class="null">寃���� 寃곌낵媛� �����듬�����.</p> -->
+							    
+						    </div>
+					    </div>
+				    </div>
+			    </div>
+			    <div class="wrapping lnb-wrap">
+                    <div class="lnb-box">
+						<h1 class="logo"><a href="/Default.aspx"><img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/h1_logo.png" alt="" /></a></h1>
+						<nav>
+					    <ul id="lnb">
+						    <li>
+							    <a href="/Schedule/Schedule.aspx">��쇱����산껐怨�</a>
+							    <div class="lnb-sub">
+								    <ul class="lnb01">
+                                        <li><a href="/Schedule/Schedule.aspx">寃쎄린��쇱����산껐怨�</a></li>
+									    
+									    <li><a href="/Schedule/GameCenter/Main.aspx">寃������쇳��</a></li>
+									    <li><a href="/Schedule/ScoreBoard.aspx">��ㅼ����대낫���</a></li>
+                                        <li><a href="/Schedule/Allstar/Game/Main2025.aspx">��ъ�ㅽ�����</a></li>
+									    <li><a href="/Schedule/International/Wbc/Main2026.aspx">援����������</a></li>
+                                        <li><a href="/Schedule/Weather.aspx">��쇨뎄��� ������</a></li>
+								    </ul>
+							    </div>
+						    </li>
+						    <li>
+							    <a href="/Record/Player/HitterBasic/Basic1.aspx?sort=HRA_RT">湲곕����살�����</a>
+							    <div class="lnb-sub">
+								    <ul class="lnb02">
+									    <li><a href="/Record/Player/HitterBasic/Basic1.aspx?sort=HRA_RT">湲곕�����</a></li>
+									    <li><a href="/Record/TeamRank/TeamRankDaily.aspx">��� ������</a></li>
+									    <li><a href="/Record/Ranking/Top5.aspx">������ ������</a></li>
+									    <li><a href="/Record/History/Top/Hitter.aspx">������ 湲곕��</a></li>
+                                        <li><a href="/Record/Expectation/WeekList.aspx">������ ��ъ�� 湲곕��</a></li>
+										<li><a href="/Record/RecordCorrect/RecordCorrect.aspx">湲곕�� ������ ������</a></li>
+										<li><a href="/Record/Crowd/GraphTeam.aspx">愿�以� ������</a></li>
+			                            
+								    </ul>
+							    </div>
+						    </li>
+						    <li>
+							    <a href="/Player/Search.aspx">������</a>
+							    <div class="lnb-sub">
+								    <ul class="lnb04">
+									    <li><a href="/Player/Search.aspx">������ 議고��</a></li>
+									    <li><a href="/Player/Register.aspx">������ ��깅�� ������</a></li>
+										<li><a href="/Player/Trade.aspx">������ ��대�� ������</a></li>
+										<li><a href="/Player/Awards/PlayerPrize.aspx">������ ������</a></li>
+										<li><a href="/Player/Legend40.aspx">��������� 40</a></li>
+									    <li><a href="/Player/CareerCertificate.aspx">寃쎈�μ��紐���� ���泥�</a></li>
+
+									    
+										
+										
+								    </ul>
+							    </div>
+						    </li>						    
+						    <li>
+							    <a href="/MediaNews/Highlight/List.aspx">誘몃����담�삳�댁��</a>
+							    <div class="lnb-sub">
+								    <ul class="lnb05">
+										<li><a href="/MediaNews/Highlight/List.aspx">�����대�쇱�댄��</a></li>
+										<li><a href="/MediaNews/News/BreakingNews/List.aspx">��댁��</a></li>
+										<li><a href="/MediaNews/Notice/List.aspx">KBO 蹂대�����猷�</a></li>
+										
+										<li><a href="/MediaNews/UbivMarketer/VideoList.aspx">��������� 留�耳����</a></li>
+										
+										
+										
+                                        
+									</ul>
+							    </div>
+						    </li>
+						    <li>
+							    <a href="javascript:;">KBO</a>
+							    <div class="lnb-sub lnb-style-all">
+								    <div class="wrapping lnb-all-wrap" style="width:713px;">
+									    <h3>KBO</h3>
+									    <div class="lnb-all kbo01">
+										    <h4>KBO 由ш렇</h4>
+										    <ul>
+											    <li><a href="/Kbo/League/GameManage2026.aspx">2026 二쇱�� 洹�������洹�移�</a></li>
+											    <li><a href="/Kbo/League/GameManageRule/GameManage.aspx">寃쎄린��댁��������</a></li>
+												<li><a href="/Kbo/League/TeamInfo.aspx">援щ�� ���媛�</a></li>
+											    <li><a href="/Kbo/League/TeamHistory.aspx">援щ�� 蹂�泥����</a></li>
+												<li><a href="/Kbo/League/Map.aspx">��곗�� ������</a></li>
+										    </ul>
+									    </div>
+									    <div class="lnb-all kbo02">
+										    <h4>寃�������</h4>
+										    <ul>
+											    <li><a href="/Kbo/Board/Notice/List.aspx">NOTICE</a></li>
+											    <li><a href="/Kbo/Board/Faqs/List.aspx">���二� ������ 吏�臾�</a></li>
+												<li><a href="/Kbo/Board/Ebook/EbookPublication.aspx">洹������살��猷����</a></li>
+
+											    
+											    
+											    
+												
+												
+												
+												
+												
+												
+											    
+											    
+											    
+											    
+											    
+										    </ul>
+									    </div>	
+									    <div class="lnb-all kbo03">
+										    <h4>ABOUT KBO</h4>
+										    <ul>
+												<li><a href="/Kbo/AboutKbo/GroupAndActivity.aspx">議곗����삵�����</a></li>
+												<li><a href="/Kbo/AboutKbo/Logo/Logo.aspx">KBO 濡�怨�</a></li>
+												<li><a href="/Kbo/AboutKbo/Committee/OrganizationChart.aspx">湲곕�����������</a></li>
+												<li><a href="/Kbo/AboutKbo/MedicalCommittee/MedicalOrganization.aspx">���臾댁��������</a></li>
+                                                
+											    
+                                                
+										    </ul>
+									    </div>	
+									    <div class="lnb-all kbo04">
+										    <h4>二쇱�� ��ъ����삵�����</h4>
+										    <ul>
+												
+												<li data-tab="MvpApplication"><a href="/Kbo/BusinessAndEvent/Mvp.aspx">2025 KBO ���������</a></li>
+												<li data-tab="DraftApplication"><a href="/Kbo/BusinessAndEvent/Draft.aspx">2026 ������ ������������</a></li>
+												<li class="lnbMedia"><a href="/Kbo/BusinessAndEvent/MediaDay.aspx">誘몃����대�곗��&��ы����ㅽ��</a></li>
+												<li><a href="/Kbo/BusinessAndEvent/RecordClass/LessonInfo.aspx">湲곕��媛���듯�� ���媛����泥�</a></li>
+												 
+												<li><a href="/Kbo/BusinessAndEvent/SafeGuide.aspx">KBO 寃쎄린��� ���������梨�</a></li>
+												<li><a href="/Kbo/BusinessAndEvent/KboArchive/PurchaseGuide.aspx">KBO 由ш렇 ������ 援щℓ</a></li>
+												<li><a href="/Kbo/BusinessAndEvent/OnSiteViewingSupport.aspx">���媛���μ����� 愿���� 吏����</a></li>
+												 
+											                                                    
+											    
+											    
+												
+
+												
+				                                
+				                                
+										    </ul>
+									    </div>	
+									    	
+									    
+								    </div>
+								    
+							    </div>
+						    </li>
+							<li class="futures">
+							    <a href="/Futures/Main.aspx">��⑥����ㅻ━洹�</a>
+							    <div class="lnb-sub">
+								    <ul class="lnb06">
+									    <li><a href="/Futures/Schedule/GameList.aspx">寃쎄린��쇱����산껐怨�</a></li>
+									    <li><a href="/Futures/TeamRank/North.aspx">��� ������</a></li>
+									    <li><a href="/Futures/Top/Main.aspx">TOP5</a></li>
+									    <li><a href="/Futures/Player/Hitter.aspx">湲곕�����</a></li>
+										<li><a href="/Futures/Player/Register.aspx">������ ��깅�� ������</a></li>
+									    
+                                        
+                                        
+									    
+									    										
+								    </ul>
+							    </div>					
+						    </li>
+							<li id="market" class="market"><a href="https://www.kbomarket.com/" target="_blank">KBO 留�耳�</a></li>
+							
+							<li id="" class="kbofont" data-tab="KboFont"><a href="/Reference/etc/KboFont.aspx">KBO ��고��</a></li>
+						    <li id="lnbAll">
+							    <a href="javascript:;">���泥� 硫����</a>
+							    <div class="lnb-sub lnb-style-all">
+								    <div class="wrapping lnb-all-wrap">
+									    <div class="line line01">
+										    <h3>���泥� 硫����</h3>
+										    <div class="lnb-all menu01">
+											    <h4>��쇱����산껐怨�</h4>
+											    <ul>
+												    <li><a href="/Schedule/Schedule.aspx">寃쎄린��쇱����산껐怨�</a></li>
+													
+													<li><a href="/Schedule/GameCenter/Main.aspx">寃������쇳��</a></li>
+													<li><a href="/Schedule/ScoreBoard.aspx">��ㅼ����대낫���</a></li>
+													<li><a href="/Schedule/Allstar/Game/Main2025.aspx">��ъ�ㅽ�����</a></li>
+													<li><a href="/Schedule/International/Wbc/Main2026.aspx">援����������</a></li>
+													<li><a href="/Schedule/Weather.aspx">��쇨뎄��� ������</a></li>
+											    </ul>
+										    </div>
+										    <div class="lnb-all menu02">
+											    <h4>湲곕����살�����</h4>
+											    <ul>
+													<li><a href="/Record/Player/HitterBasic/BasicOld.aspx?sort=HRA_RT">湲곕�����</a></li>
+													<li><a href="/Record/TeamRank/TeamRankDaily.aspx">��� ������</a></li>
+													<li><a href="/Record/Ranking/Top5.aspx">������ ������</a></li>
+													<li><a href="/Record/History/Top/Hitter.aspx">������ 湲곕��</a></li>
+													<li><a href="/Record/Expectation/WeekList.aspx">������ ��ъ�� 湲곕��</a></li>
+													<li><a href="/Record/RecordCorrect/RecordCorrect.aspx">湲곕�� ������ ������</a></li>
+													<li><a href="/Record/Crowd/GraphTeam.aspx">愿�以� ������</a></li>
+													
+											    </ul>
+										    </div>	
+										    <div class="lnb-all menu03">
+											    <h4>������</h4>
+											    <ul>
+													<li><a href="/Player/Search.aspx">������ 議고��</a></li>
+													<li><a href="/Player/Register.aspx">������ ��깅�� ������</a></li>
+													<li><a href="/Player/Trade.aspx">������ ��대�� ������</a></li>
+													<li><a href="/Player/Awards/PlayerPrize.aspx">������ ������</a></li>
+													<li><a href="/Player/Legend40.aspx">��������� 40</a></li>
+													<li><a href="/Player/CareerCertificate.aspx">寃쎈�μ��紐���� ���泥�</a></li>
+											    </ul>
+										    </div>	
+										    <div class="lnb-all menu04">
+											    <h4>誘몃����담�삳�댁��</h4>
+											    <ul>
+												    <li><a href="/MediaNews/Highlight/List.aspx">�����대�쇱�댄��</a></li>
+													<li><a href="/MediaNews/News/BreakingNews/List.aspx">��댁��</a></li>
+													<li><a href="/MediaNews/Notice/List.aspx">KBO 蹂대�����猷�</a></li>
+													
+													<li><a href="/MediaNews/UbivMarketer/VideoList.aspx">��������� 留�耳����</a></li>
+													
+													
+													
+													
+											    </ul>
+										    </div>	
+										    <div class="lnb-all menu05">
+											    <h4>��⑥����ㅻ━洹�</h4>
+											    <ul>
+												    <li><a href="/Futures/Schedule/GameList.aspx">寃쎄린��쇱����산껐怨�</a></li>
+												    <li><a href="/Futures/TeamRank/North.aspx">��� ������</a></li>
+												    <li><a href="/Futures/Top/Main.aspx">TOP5</a></li>
+												    <li><a href="/Futures/Player/Hitter.aspx">湲곕�����</a></li>
+													<li><a href="/Futures/Player/Register.aspx">������ ��깅�� ������</a></li>
+												    												
+											    </ul>
+										    </div>
+									    </div>
+									    <div class="line line02">
+										    <h3>KBO</h3>
+										    <div class="lnb-all menu07">
+											    <h4>KBO 由ш렇</h4>
+											    <ul>
+													<li><a href="/Kbo/League/GameManage2026.aspx">2026 二쇱�� 洹�������洹�移�</a></li>
+                                                    <li><a href="/Kbo/League/GameManageRule/GameManage.aspx">寃쎄린��댁��������</a></li>
+													<li><a href="/Kbo/League/TeamInfo.aspx">援щ�� ���媛�</a></li>
+													<li><a href="/Kbo/League/TeamHistory.aspx">援щ�� 蹂�泥����</a></li>
+													<li><a href="/Kbo/League/Map.aspx">��곗�� ������</a></li>
+											    </ul>
+										    </div>
+										    <div class="lnb-all menu08">
+											    <h4>寃�������</h4>
+											    <ul>
+												    <li><a href="/Kbo/Board/Notice/List.aspx">NOTICE</a></li>
+													<li><a href="/Kbo/Board/Faqs/List.aspx">���二� ������ 吏�臾�</a></li>
+													<li><a href="/Kbo/Board/Ebook/EbookPublication.aspx">洹������살��猷����</a></li>
+													
+													
+													
+													
+													
+													
+													
+													
+													
+													
+													
+													
+													
+													
+													
+											    </ul>
+										    </div>	
+										    <div class="lnb-all menu09">
+											    <h4>ABOUT KBO</h4>
+											    <ul>
+													<li><a href="/Kbo/AboutKbo/GroupAndActivity.aspx">議곗����삵�����</a></li>
+													<li><a href="/Kbo/AboutKbo/Logo/Logo.aspx">KBO 濡�怨�</a></li>
+													<li><a href="/Kbo/AboutKbo/Committee/OrganizationChart.aspx">湲곕�����������</a></li>
+													<li><a href="/Kbo/AboutKbo/MedicalCommittee/MedicalOrganization.aspx">���臾댁��������</a></li>
+													
+													
+													
+											    </ul>
+										    </div>	
+										    <div class="lnb-all menu10 ">
+											    <h4>二쇱�� ��ъ����삵�����</h4>
+											    <ul>
+												    <li data-tab="MvpApplication"><a href="/Kbo/BusinessAndEvent/Mvp.aspx">2025 KBO ���������</a></li>
+													<li data-tab="DraftApplication"><a href="/Kbo/BusinessAndEvent/Draft.aspx">2026 ������ ������������</a></li>
+													<li class="lnbMedia"><a href="/Kbo/BusinessAndEvent/MediaDay.aspx">誘몃����대�곗��&��ы����ㅽ��</a></li>
+													<li><a href="/Kbo/BusinessAndEvent/RecordClass/LessonInfo.aspx">湲곕��媛���듯�� ���媛����泥�</a></li>
+												    
+												    
+													<li><a href="/Kbo/BusinessAndEvent/SafeGuide.aspx">KBO 寃쎄린��� ���������梨�</a></li>
+													<li><a href="/Kbo/BusinessAndEvent/KboArchive/PurchaseGuide.aspx">KBO 由ш렇 ������ 援щℓ</a></li>
+													<li><a href="/Kbo/BusinessAndEvent/OnSiteViewingSupport.aspx">���媛���μ����� 愿���� 吏����</a></li>
+													 
+													
+											    </ul>
+										    </div>
+									    </div>
+								    </div>
+								    <div class="btn-close">
+									    <a href="javascript:;">
+										    <img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/btn_close_fff.png" alt="" />
+										    <span>��リ린</span>
+									    </a>									
+								    </div>
+							    </div>
+						    </li>
+					    </ul>
+				    </nav>
+					</div>
+			    </div>
+		    </header>
+		    <!-- // header -->
+		    <hr />
+		    <!-- container -->
+		    
+    
+<section id="container">
+	<div class="wrapping container-wrap">			
+		<aside>
+			<h3>��쇱����산껐怨�</h3>
+			<ul id="snb">
+                <li><a href="/Schedule/Schedule.aspx" id="lnbGameSchedule">寃쎄린��쇱����산껐怨�</a></li>
+				
+				<li><a href="/Schedule/GameCenter/Main.aspx" id="lnbGameCenter">寃������쇳��</a></li>
+				<li><a href="/Schedule/ScoreBoard.aspx" id="lnbScoreBoard">��ㅼ����대낫���</a></li>
+                <li><a href="/Schedule/Allstar/Game/Main2025.aspx" id="lnbAllstar">��ъ�ㅽ�����</a></li>
+				<li><a href="/Schedule/International/Wbc/Main2026.aspx" id="lnbInternational">援����������</a></li>
+                <li><a href="/Schedule/Weather.aspx" id="lnbWeather">��쇨뎄��� ������</a></li>
+			</ul>
+            
+			
+		</aside>
+		
+<div id="contents">
+	<div class="location">
+		<span class="home"><a href="/Default.aspx"><img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/ico_home.gif" alt="�����쇰��" /></a></span> >
+		<span class="depth1"><a href="/Schedule/GameCenter/Main.aspx">��쇱����산껐怨�</a></span> > 
+		<span class="depth2">寃������쇳��</span>
+	</div>
+	<h4 class="tit-page">寃������쇳��</h4>			
+	<!-- ���釉�而⑦��痢� ������ -->
+	<div class="date-select">
+		<ul class="date">
+			<li class="prev"><a href="#none;" id="lnkPrev"><img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/main/btn_prev.png" alt="" /></a></li>
+			<li class="today"><span id="lblGameDate" class="date-txt"></span></li>
+			<li class="next"><a href="#none;" id="lnkNext"><img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/main/btn_next.png" alt="" /></a></li>
+		</ul>
+        <div class="btn-wrap right">
+            <input type="text" id="txtGameDate" style="display:none;"/>
+        </div>
+	</div>
+	<div class="today-game">
+		<ul class="game-list"></ul>
+	</div>
+
+
+    <!-- 寃쎄린 ��쇱�� - new -->
+    
+
+    <div class="tab-depth1">
+		<ul class="tab tab2" id="tabDepth2">
+			
+		</ul>
+	</div>
+
+    <div id="gameCenterContents"></div>
+
+    <div id="gameComment" style="display:none;">寃쎄린媛� ���������硫� �����깊�� ��⑸�����.</div>
+    <input type="hidden" id="nowDate" />
+    <input type="hidden" id="BeforeDate" />
+    <input type="hidden" id="AfterDate" />
+</div>
+
+	</div>
+</section>
+
+
+		    <!-- // container -->	
+		    <hr />
+		    <!-- footer -->
+		    <footer>
+			    <div id="fnb">
+				    <div class="wrapping fnb-wrap">
+					    <ul class="fnb-list">
+						    <li class="privacy"><a href="/Etc/Privacy.aspx">媛���몄��蹂� 泥�由щ갑移�</a></li>
+						    <li><a href="/Schedule/ScoreBoard.aspx">臾몄��以�怨�</a></li>
+						    <li><a href="/Kbo/Board/Faqs/List.aspx">怨�媛�吏�臾�</a></li>
+						    <li><a href="/Etc/SiteMap.aspx">��ъ�댄�몃㏊</a></li>
+						    
+					    </ul>
+				    </div>
+			    </div>
+			    <div id="kboInfo" class="wrapping">
+				    <h2><a href="/Etc/PressRelease.aspx"><img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/common/h2_logo.png" alt="KBO" /></a></h2>
+				    <address class="kbo-info">
+					    <div class="address01">
+						    <p>(���)���援���쇨뎄��������� | �����몄�� 媛���④뎄 媛���⑤��濡� 278 | 02)3460-4600</p>					
+					    </div>
+					    
+				    </address>
+				    <div class="copyright">
+					    <span>Copyright��� KBO, All Rights Reserved.</span>
+				    </div>
+					<div class="certification">
+						<img src="//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/main/img_certification.png" alt="w3c xhtml 3.0, Verisign" />
+					</div>
+			    </div>
+		    </footer>
+		    <!-- // footer -->
+	    </div>
+	    <!-- // wrap -->
+    </form>
+    
+    
+
+    
+    
+    
+<script type="text/javascript">
+    var gameId = "";
+    var section = "";
+    var minYear = 2001; //20180504 heokyunam �����밴�����由щ�� ���泥�
+    var maxYear = getGameMaxYear("0,1,3,4,5,7,9"); //new Date().getFullYear();
+
+    $(document).ready(function () {
+        currentLnb("GameCenter");
+
+        var date = new Date();
+        $.datepicker.setDefaults($.datepicker.regional['ko']);
+        var nowDate = $.datepicker.formatDate('yymmdd', date);
+
+        // 寃쎄린 ���吏� �����쇰�명�� 泥댄��
+        if (Request("gameDate") != undefined && Request("gameDate") != "") {
+            nowDate = Request("gameDate");
+        }
+
+        // 寃쎄린 �����대�� �����쇰�명�� 泥댄��
+        if (Request("gameId") != undefined && Request("gameId") != "") {
+            gameId = Request("gameId");
+        }
+
+        // ��� �����쇰�명�� 泥댄��
+        if (Request("section") != undefined && Request("section") != "") {
+            section = Request("section");
+        }
+
+        $('#txtGameDate').datepicker({
+            dateFormat: 'yymmdd'
+            , minDate: "20010405" // '20100306' 20180504 heokyunam �����밴�����由� ���泥�
+            , showOn: "button"
+            , buttonImage: "//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/main/btn_calendar.png"
+            , buttonImageOnly: true
+            , beforeShow: function (textbox, instance) {
+                instance.dpDiv.css({
+                    marginTop: '30px',
+                    marginLeft: '-163px'
+                });
+            }, onSelect: function (selectedDate) {
+                getGameDate(selectedDate);
+                $(".tab-depth1").addClass("dp-none");
+            },
+			changeMonth: true,
+			changeYear: true,
+			yearRange: String.format("{0}:{1}", minYear, maxYear),
+			yearSuffix: ''
+        });
+
+        initControl();
+        getGameDate(nowDate);  // 寃쎄린��쇱��
+    });
+
+    $(document).on("click", ".list-review, .game-list", function (e) {
+        $(".tab-depth1").removeClass("dp-none");
+    });
+
+    // 寃쎄린 ������
+    $(document).on("click", "#contents .game-list-n > li:not([game_sc=4])", function (e) {
+        $(".tab-depth1").removeClass("dp-none");
+        $(this).addClass("on").siblings().removeClass("on");
+
+        setGameEtc();
+    });
+
+    // 寃쎄린(���諛�,��ㅽ�������댁��,NEWS,��쇱�몄�� ���) ��� ������
+    $(document).on("click", "#tabDepth2 > li > a", function (e) {
+        var game = $("ul.game-list-n > li.on");
+
+        //if ($(".article_title").children("p").text() != "") {
+        //    $(".article").remove();
+        //}
+
+        if (game.attr("result_ck") == "0" && $(this).text() == "由щ럭") {
+            alert("湲곕�� �����곗�댄�� ������������.");
+        }
+        else {
+            $(this).parent().addClass("on").siblings().removeClass("on");
+            setGameDetail();
+        }
+        e.preventDefault();
+    });
+
+    // 珥�湲고��
+    function initControl() {
+        $("#txtGameDate").val($.datepicker.formatDate('yymmdd', new Date()));
+        $("#lblGameDate").text($.datepicker.formatDate('yy.mm.dd(D)', new Date()));
+    }
+
+    // 珥�湲고�� - �����쇰�명��
+    function initParam() {
+        gameId = "";
+        section = "";
+        $(".tab-depth1").addClass("dp-none");
+    }
+
+    // ��댁�� 踰���� ��대┃���
+    $(document).on("click", "#lnkPrev",
+        $.debounce(200, function (e) {
+            if ($("#BeforeDate").val() == "") {
+                alert('��댁�� 寃쎄린 ��쇱����� ��깅�����吏� ��������듬�����.');
+            } else {
+                getGameDate($("#BeforeDate").val());
+            }
+        })
+    );
+
+    // ��ㅼ�� 踰���� ��대┃���
+    $(document).on("click", "#lnkNext",
+        $.debounce(200, function (e) {
+            if ($("#AfterDate").val() == "") {
+                alert('��ㅼ�� 寃쎄린 ��쇱����� ��깅�����吏� ��������듬�����.');
+            } else {
+                getGameDate($("#AfterDate").val());
+            }
+        })
+    );
+
+    // 寃쎄린���吏�(��댁��,������,��ㅼ��)
+    function getGameDate(selectDate) {
+        var srId = "0,1,3,4,5,7,9";
+        if ($("#txtGameDate").val().substring(0, 4) >= "2021") {
+            srId = "0,1,3,4,5,6,7,8,9";
+        }
+
+        var request = $.ajax({
+            type: "post"
+            , url: "/ws/Main.asmx/GetKboGameDate"
+            , dataType: "json"
+            , data: {
+                leId: "1"
+                , srId: srId     // 1援� ���泥댁��由ъ��
+                , date: selectDate
+            }
+            , error: ajaxFailed
+            , async: false
+        });
+
+        request.done(function (data) {
+            //if (data.BEFORE_G_DT == "") {
+            //    $("#lnkPrev").attr("href", "javascript:alert('��댁�� 寃쎄린 ��쇱����� ��깅�����吏� ��������듬�����.');");
+            //} else {
+            //    $("#lnkPrev").attr("href", String.format("javascript:initParam();getGameDate({0})", data.BEFORE_G_DT));
+            //}
+
+            //if (data.AFTER_G_DT == "") {
+            //    $("#lnkNext").attr("href", "javascript:alert('��ㅼ�� 寃쎄린 ��쇱����� ��깅�����吏� ��������듬�����.');");
+            //} else {
+            //    $("#lnkNext").attr("href", String.format("javascript:initParam();getGameDate({0})", data.AFTER_G_DT));
+            //}
+
+            $("#txtGameDate").val(data.NOW_G_DT);
+            $("#lblGameDate").text(data.NOW_G_DT_TEXT);
+
+            // ���吏� ������
+            $("#nowDate").val(data.NOW_G_DT);
+            $("#BeforeDate").val(data.BEFORE_G_DT);
+            $("#AfterDate").val(data.AFTER_G_DT);
+
+            getGameList();
+            setGameEtc();
+        });
+    }
+
+    // 寃쎄린由ъ�ㅽ��
+    function getGameList() {
+        var srId = "0,1,3,4,5,7,9";
+        if ($("#txtGameDate").val().substring(0, 4) >= "2021") {
+            srId = "0,1,3,4,5,6,7,9";
+        }
+        /** 援�媛������� ���媛���� 異���� (������) */
+        if ($("#txtGameDate").val() >= "20241026") {
+            srId = "0,1,3,4,5,6,7,8,9";
+        }
+
+        var request = $.ajax({
+            type: "post"
+            , url: "/ws/Main.asmx/GetKboGameList"
+            , dataType: "json"
+            , data: {
+                leId: "1"
+                , srId: srId     // 1援� ���泥댁��由ъ��
+                , date: $("#txtGameDate").val()
+            }
+            , error: ajaxFailed
+            , async: false
+        });
+
+        request.done(function (data) {
+            var container = $(".today-game");
+            container.children().remove();
+            $("#tabDepth2").children().remove();
+            container.append($("<ul class='game-list-n'></ul>"));
+            var weatherData = setWeather("1", "0,1,3,4,5,7");
+            $(".game-list-n").S2iGameListGameCenter({ btnView: false, data: data.game, weatherText: false, weatherData: weatherData });
+            $('.game-list-n').bxSlider({ auto: false, pause: 4000, speed: 700, pager: false, controls: true, autoStart: true, autoControls: false, slideWidth: 160, minSlides: 5, maxSlides: 5, slideMargin: 9, infiniteLoop: false, hideControlOnEnd: true });
+            
+            // 寃쎄린 �����대�� �����쇰�명�� 泥댄��, ��대�� 寃쎄린 ������ 寃쎌�곕��
+            if (gameId != "" && $(".game-list-n > li[g_id=" + gameId + "]").length > 0) {
+                $(".game-list-n > li").siblings().removeClass("on");
+                $(".game-list-n > li[g_id=" + gameId + "]").addClass("on");
+            }
+        });
+    }
+
+    // 寃쎄린������ 湲고�� ��댁��
+    function setGameEtc() {
+        
+        var game = $("ul.game-list-n > li.on");
+        //game.attr("game_sc", "2");
+        //game.attr("sr_id", "9");
+
+        var gameDate = game.attr("g_dt");
+        var leId = game.attr("le_id");
+        var srId = game.attr("sr_id");
+        var season = game.attr("season");
+        var gameSc = game.attr("game_sc");
+        var entry = game.attr("entry_ck");
+        var startPitcher = game.attr("start_ck");
+        var vodCheck = game.attr("vod_ck");
+        var gameScId = game.attr("game_sc_id");
+        
+        if (game.html() == undefined) { // ���泥� 痍⑥��
+            $("#gameCenterContents").children().remove();
+
+            //$("#gameComment").text("��뱀�� 寃쎄린��� 紐⑤�� 痍⑥����������듬�����.");
+            //$("#gameComment").show();
+        } else {
+            if (leId == "1") {
+
+                // �����대�쇱�댄�� ������ 泥댄��
+                if ($("object#player").length > 0 && getBrowserInfoStr() == "Explorer") {
+                    //alert(getBrowserInfoStr())
+                    this.player = document.getElementById("player");
+                    this.player.url = "";
+                    this.player.controls.pause();
+                }
+
+                // ���洹����利� ������ 援���������� 寃쎌�� srId 蹂�寃�
+                if (srId.indexOf("0") > -1 || srId.indexOf("8") > -1 || srId.indexOf("9") > -1) {
+                    srId = "0,8,9";
+                }
+
+                if (srId == "1" && gameSc == "1") { // ���踰�寃쎄린��� 寃쎄린��� ���由щ럭 誘명��異�
+                    $("#tabDepth2").children().remove();
+                    $("#gameCenterContents").children().remove();
+
+                    $("#gameComment").show();
+
+                } else if ((srId == "0,8,9" && game.attr("sr_id") == "9" && (gameSc == "1" || gameSc == "2")) || (game.attr("sr_id") == "8" && gameSc == "2" && gameScId == "41")) { // ��ъ�ㅽ�����, ���媛����
+                    $("#tabDepth2").children().remove();
+                    $("#gameCenterContents").children().remove();
+
+                    var comment = "";
+
+                    if (gameSc == "1") { // ���由щ럭
+                        comment = "��ъ�ㅽ�������� ���由щ럭媛� ���怨듬��吏� �����듬�����.";
+                    } else if (gameSc == "2") { // 寃쎄린以�
+                        comment = "寃쎄린 醫�猷� ��� ��ㅻ�� 寃쎄린 湲곕����� �����명����� ��� �����듬�����.";
+                    }
+
+                    $("#gameComment").text(comment);
+                    $("#gameComment").show();
+                } else if (srId == "0,8,9" && game.attr("sr_id") == "8" && ((gameSc == "1" || gameSc == "2" || game.attr("g_id").indexOf("KR") == -1))) { // 援����寃쎄린
+                    $("#tabDepth2").children().remove();
+                    $("#gameCenterContents").children().remove();
+                    
+                    var comment = "";
+
+                    if (gameSc == "1") {
+                        comment = "援������������� ���由щ럭瑜� ���怨듯��吏� �����듬�����.";
+                    } else if (gameSc == "2") {
+                        comment = "援������������� ��ㅽ�������댁�대�� ���怨듯��吏� �����듬�����.";
+                    } else if (game.attr("g_id").indexOf("KR") == -1) {
+                        comment = "由щ럭��� ���援� 寃쎄린留� ���怨듯�⑸�����.";
+                    }
+
+                    $("#gameComment").text(comment);
+                    $("#gameComment").show();
+                } else if (srId == "0,8,9" && gameSc == "1" && new Date() < new Date(2019, 2, 20, 00, 00)) { // ���踰�寃쎄린 ��������� ���由щ럭 ��� ��④린湲�
+                    $("#tabDepth2").children().remove();
+                    $("#gameCenterContents").children().remove();
+
+                    $("#gameComment").text("2019 ���洹����利� ���由щ럭��� ���踰�寃쎄린 ��댄��遺���� ���異���⑸�����.");
+                    $("#gameComment").show();
+                } else if ("8,9".indexOf(game.attr("sr_id")) != 1 && gameSc == "3" && game.attr("result_ck") == 0) { // 援����������, ��ъ�ㅽ����� ������ ���.
+                    $("#tabDepth2").children().remove();
+                    $("#gameCenterContents").children().remove();
+
+                    $("#gameComment").text("湲곕�� �����곗�댄�� ������������.");
+                    $("#gameComment").show();
+                    //} else if (srId == "0,8,9" && gameSc == "3" && game.attr("g_id").indexOf("KR") > -1 && gameScId != "41") {  // 21.07.15 | veron | 援���������� 由щ럭 誘명��異�
+                    //    $("#tabDepth2").children().remove();
+                    //    $("#gameCenterContents").children().remove();
+                    //    $("#gameComment").text("援������������� 由щ럭瑜� ���怨듯��吏� �����듬�����.");
+                    //    $("#gameComment").show();
+
+                    //} else {
+                } else {
+                    $("#gameComment").hide();
+                    
+                    srId = game.attr("sr_id"); // 2017-07-14 yeeun, ��ъ�ㅽ����� �����몄��由� �����댁��
+
+                    setGameTab(leId, srId, season, gameSc, entry, startPitcher, vodCheck);
+
+                    // ��� �����쇰�명�� 泥댄��
+                    if (section != "") {
+                        $("#tabDepth2 > li").siblings().removeClass("on");
+                        $("#tabDepth2 > li[section=" + Request("section") + "]").addClass("on");
+                        setGameDetailSection(Request("section"));
+                        section = "";
+
+                        history.pushState(null, null, "/Schedule/GameCenter/Main.aspx"); // 湲곗〈 section �����쇰�명�곌�� ��ㅻⅨ 寃쎄린 ��대����� �����μ�� ��쇱묠
+                    } else {
+                        setGameDetail();
+                    }
+                }
+            } else {
+                $("#gameCenterContents").children().remove();
+
+                $("#gameComment").hide();
+            }
+        }
+    }
+
+    // 寃쎄린(���由щ럭/ ��ㅽ�������댁�� / 由щ럭 / �����대�쇱�댄�� ���) ��� ������
+    function setGameTab(leId, srId, season, gameSc, entry, startPitcher, vodCheck) {
+        var ul = $("#tabDepth2");
+        ul.removeClass();
+        ul.addClass("tab");
+        ul.children().remove();
+
+        if (gameSc == "1") { // 寃쎄린��� : ���由щ럭
+            ul.append($("<li class='tab-tit' section='START_PIT'><a href='#none'>���由щ럭</a></li>"));
+        } else if (gameSc == "2" || gameSc == "5") { // 寃쎄린以�, �����ㅽ�������� : ��ㅽ�������댁��
+            ul.append($("<li class='tab-tit' section='KEY_PIT'><a href='#none'>��ㅽ�������댁��</a></li>"));
+        } else { // 寃쎄린醫�猷� : ��ㅽ�������댁�� / 由щ럭 / �����대�쇱�댄��
+            if (srId != "8" && srId != "9" && parseInt(season) >= 2016) {
+                ul.append($("<li class='tab-tit' section='KEY_PIT'><a href='#none'>��ㅽ�������댁��</a></li>"));
+            }
+            ul.append($("<li class='tab-tit' section='REVIEW'><a href='#none'>由щ럭</a></li>"));
+
+            if (vodCheck == 1 && season >= 2016)
+            {
+                ul.append($("<li class='tab-tit' section='HIGHLIGHT'><a href='#none'>�����대�쇱�댄��</a></li>"));
+            }
+        }
+
+        ul.addClass(String.format("tab{0}", ul.children("li").length));
+        ul.children("li").eq(0).addClass("on");
+    }
+
+    // 寃쎄린 ������ 遺����(���由щ럭, LIVE, 由щ럭)
+    function setGameDetail() {
+        var li = $(".game-list-n > li.on");
+        var leId = li.attr("le_id");
+        var srId = li.attr("sr_id");
+        var seasonId = li.attr("season");
+        var gameSc = li.attr("game_sc");
+        var gameId = li.attr("g_id");
+        var awayTeam = li.attr("away_id");
+        var homeTeam = li.attr("home_id");
+        var awayPit = li.attr("away_p_id");
+        var homePit = li.attr("home_p_id");
+
+        var tab = $("#tabDepth2 > li.on");
+        var section = tab.attr("section");
+        
+        //alert($("#txtTitle").text().length)
+        if ($("object#player").length > 0 && getBrowserInfoStr() == "Explorer")
+        {
+            //alert(getBrowserInfoStr())
+            this.player = document.getElementById("player");
+            this.player.url = "";
+            this.player.controls.pause();
+        }
+
+        //if ($("object#player").length > 0) {
+        //    this.player = document.getElementById("player");
+        //    this.player.url = "";
+        //    this.player.controls.pause();
+        //}
+        
+        if (gameSc == "1") {
+            setPreview(section, leId, srId, seasonId, gameId, awayTeam, homeTeam, awayPit, homePit);
+            setPreviewTab(section, awayPit, homePit);
+        } else if (gameSc == "2" || gameSc == "5") {
+            setLive(section, leId, srId, seasonId, gameId);
+        } else if (gameSc == "3") {
+            setReview(section, leId, srId, seasonId, gameId);
+        }
+
+        $("#gameCenterContents").show();
+    }
+
+    // 釉���쇱�곗��������
+    function getBrowserInfoStr() {
+        var strBrowser = '';
+        var ua = navigator.userAgent;
+        if (ua.indexOf("Firefox") != -1) strBrowser = "Firefox";
+        else if (ua.indexOf("Chrome") != -1) strBrowser = "Chrome";
+        else if (ua.indexOf("MSIE") != -1) strBrowser = "Explorer";
+        else strBrowser = "ETC";
+        return strBrowser;
+    }
+
+    // 寃쎄린 ������ 遺����(���由щ럭, LIVE, 由щ럭)
+    function setGameDetailSection(section) {
+        var li = $(".game-list-n > li.on");
+        var leId = li.attr("le_id");
+        var srId = li.attr("sr_id");
+        var seasonId = li.attr("season");
+        var gameSc = li.attr("game_sc");
+        var gameId = li.attr("g_id");
+        var awayTeam = li.attr("away_id");
+        var homeTeam = li.attr("home_id");
+        var awayPit = li.attr("away_p_id");
+        var homePit = li.attr("home_p_id");
+
+        if (gameSc == "1") {
+            setPreview(section, leId, srId, seasonId, gameId, awayTeam, homeTeam, awayPit, homePit);
+            setPreviewTab(section, awayPit, homePit);
+        } else if (gameSc == "2" || gameSc == "5") {
+            setLive(section, leId, srId, seasonId, gameId);
+        } else if (gameSc == "3") {
+            setReview(section, leId, srId, seasonId, gameId);
+        }
+
+        $("#gameCenterContents").show();
+    }
+
+    // ���由щ럭
+    function setPreview(section, leId, srId, seasonId, gameId, awayTeam, homeTeam, awayPit, homePit) {
+        switch (section) {
+            case "START_PIT": // ���諛���ъ�� �����λ�����
+                if (awayPit == undefined){
+                    //alert("���諛���ъ�� �����λ�������� ���諛���ъ�� ��깅�� ��� 湲곕����� �����곗�댄�몃�⑸�����.");
+                    $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Preview/Team.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, awayTeam: awayTeam, homeTeam: homeTeam, gameId: gameId }, async:false });
+                }
+                else {
+                    $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Preview/StartPitcher.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, awayTeam: awayTeam, homeTeam: homeTeam, awayPit: awayPit, homePit: homePit, gameId: gameId }, async: false });
+                }
+                //$("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Preview/StartPitcher.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, awayTeam: awayTeam, homeTeam: homeTeam, awayPit: awayPit, homePit: homePit, gameId: gameId }, async: false });
+                break;
+            case "TEAM": // ��� �����λ��援�
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Preview/Team.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, awayTeam: awayTeam, homeTeam: homeTeam, gameId: gameId }, async: false });
+                break;
+            case "LINEUP": // ��쇱�몄�� 遺����
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Preview/LineUp.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId }, async: false });
+                break;
+        }
+    }
+
+    // LIVE
+    function setLive(section, leId, srId, seasonId, gameId) {
+        switch (section) {
+            case "KEY_PIT": // ��ㅽ�������댁��
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/KeyPlayerPitcher.aspx?version=20181219", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                break;
+            case "KEY_HIT": // ��ㅽ�������댁�� : ������
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/KeyPlayerHitter.aspx?version=20181219", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                break;
+        }
+    }
+
+    // 由щ럭
+    function setReview(section, leId, srId, seasonId, gameId) {
+        switch (section) {
+            case "REVIEW": // 由щ럭
+                //$("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Review.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/ReviewNew.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                break;
+            case "KEY_PIT": // ��ㅽ�������댁�� : ��ъ��
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/KeyPlayerPitcher.aspx?version=20181219", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                break;
+            case "KEY_HIT": // ��ㅽ�������댁�� : ������
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/KeyPlayerHitter.aspx?version=20181219", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                break;
+            case "HIGHLIGHT": // �����대�쇱�댄��
+                $("#gameCenterContents").S2iAjaxHtml({ url: "/Schedule/GameCenter/Highlight.aspx", param: { leId: leId, srId: srId, seasonId: seasonId, gameId: gameId } });
+                break;
+        }
+    }
+
+    // ���由щ럭 ������ TAB
+    function setPreviewTab(section, awayPit, homePit) {
+        var ul = $("#tabPreview");
+        ul.children().remove();
+
+        switch(section)
+        {
+            case "START_PIT": // ���諛���ъ�� �����λ�����
+                if (awayPit == undefined){
+                    ul.append($("<li class='on'><a href=\"javascript:setGameDetailSection('TEAM');\">��� �����λ��援�</a></li>"));
+                }
+                else{
+                    ul.append($("<li class='on'><a href=\"javascript:setGameDetailSection('START_PIT');\">���諛���ъ�� �����λ�����</a></li>"));
+                    ul.append($("<li><a href=\"javascript:setGameDetailSection('TEAM');\">��� �����λ��援�</a></li>"));
+                }
+
+                ul.append($("<li><a href=\"javascript:setGameDetailSection('LINEUP');\">��쇱�몄�� 遺����</a></li>"));
+                break;
+            case "TEAM": // ��� �����λ��援�
+                if (awayPit == undefined) {
+                    ul.append($("<li class='on'><a href=\"javascript:setGameDetailSection('TEAM');\">��� �����λ��援�</a></li>"));
+                }
+                else {
+                    ul.append($("<li><a href=\"javascript:setGameDetailSection('START_PIT');\">���諛���ъ�� �����λ�����</a></li>"));
+                    ul.append($("<li class='on'><a href=\"javascript:setGameDetailSection('TEAM');\">��� �����λ��援�</a></li>"));
+                }
+                ul.append($("<li><a href=\"javascript:setGameDetailSection('LINEUP');\">��쇱�몄�� 遺����</a></li>"));
+                break;
+            case "LINEUP": // ��쇱�몄�� 遺����
+                if (awayPit == undefined) {
+                    ul.append($("<li><a href=\"javascript:setGameDetailSection('TEAM');\">��� �����λ��援�</a></li>"));
+                } else {
+                    ul.append($("<li><a href=\"javascript:setGameDetailSection('START_PIT');\">���諛���ъ�� �����λ�����</a></li>"));
+                    ul.append($("<li><a href=\"javascript:setGameDetailSection('TEAM');\">��� �����λ��援�</a></li>"));
+                }
+                ul.append($("<li class='on'><a href=\"javascript:setGameDetailSection('LINEUP');\">��쇱�몄�� 遺����</a></li>"));
+                break;
+        }
+
+        ul.show()
+    }
+
+</script>
+
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+            //getScheduleBTogether119();  // B TOGETHER119
+
+            //$("#dvLink").click(function () {
+            //    location.href = "/About/Etc/BTogether119.aspx"
+            //});
+        });
+        
+        // B TOGETHER 119
+        function getScheduleBTogether119() {
+            var request = $.ajax({
+                type: "post"
+                , url: "/ws/About.asmx/GetBTogether"
+                , dataType: "json"
+                , data: {
+                    leId: "1"
+                    , srId: "0"
+                    , seasonId: "2019"
+                }
+                , error: ajaxFailed
+                , async: true
+            });
+
+            request.done(function (data) {
+                
+                if (data.code == "100") {
+                    getSaveMoney(data, "dvScheduleMoney");
+                }
+            });
+        }
+    </script>
+
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+            // ������ 寃����
+            $(document).on("click", "#btnTopPlayerSearch", function (e) {
+                getPlayerSearch();
+                e.preventDefault();
+            });
+
+            // ������ 寃���� ������
+            $(document).on("keypress", "#txtTopPlayerWord", function (e) {
+                if (event.keyCode == 13) {
+                    getPlayerSearch();
+                    e.preventDefault();
+                }
+			});
+
+            //// ������ 寃���� 留���곗�� ������
+            //$("body").click(function (e) {
+            //    var container = $("#player_search_area");
+
+            //    if (container.css("display") == "block") {
+            //        if (!container.has(e.target).length) {
+            //            container.hide();
+            //        }
+            //    }
+            //});
+
+			// 21.06.29 | veron | ���以���� ������ ��� 吏���곌�� 諛곕�� ��ㅼ�� ���蹂� ��� ��대��遺� ��������댁�쇳��
+			// 8��� 15��� 00��� 吏����媛�硫� ������
+            //if (new Date().getTime() > new Date("2021/08/15 00:00:00").getTime()) {
+			//	// ������ ��� ������
+            //    $(".menu04 li:last").remove();
+            //    $(".lnb-sub ul.lnb04 li:last").remove();
+			//	// Player.master ������
+            //    $("#liRookie").remove();
+			//	// 硫���� 諛곕�� 援�泥�
+            //    $("#imgGijang").attr("href", "http://gijangcmc.or.kr/baseball/main/main.asp");
+            //    $("#imgGijang img").attr("src", "//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome/resources/images/main/img_banner01.jpg");
+			//}
+
+			// 2026 誘몃����대�곗��
+            if (new Date().getTime() < new Date("2026/03/18 11:00:00"))
+				$('.lnbMedia').hide();
+			// SaveSacrifice
+			if (new Date().getTime() < new Date("2023/04/01 09:00:00"))
+				$('[data-tab=SaveSacrifice]').hide();
+			// draft 
+			// 2025.09.09 11��� ��댁�� ������ 2025.09.10 00:30 ��댄��濡���� ���異� ��④��
+            if (new Date().getTime() < new Date("2025/09/09 11:00:00") || new Date().getTime() > new Date("2025/09/10 00:30:00"))
+				$('[data-tab=DraftApplication]').hide();
+			// KBO ���������
+            if (new Date().getTime() < new Date("2025/11/19 11:00:00") || new Date().getTime() > new Date("2025/11/20 00:30:00"))
+				$('[data-tab=MvpApplication]').hide();
+            // KBO 怨⑤��湲���щ��
+            if (new Date().getTime() < new Date("2024/12/09 10:00:00") || new Date().getTime() > new Date("2024/12/09 15:30:00"))
+                $('[data-tab=GGApplication]').hide();
+        });
+
+        // ������ 寃����
+        function getPlayerSearch() {
+            if ($("#txtTopPlayerWord").val() == "") {
+                alert("������紐���� ������ ���������.");
+                $("#txtTopPlayerWord").focus();
+                return false;
+            } else {
+                //var searchWord = encodeURI($("#txtTopPlayerWord").val());
+
+                //if (searchWord != "") {
+                //    location.href = "/Player/Search.aspx?searchWord=" + searchWord;
+                //}
+                var request = $.ajax({
+                    type: "post"
+                    , url: "/ws/Controls.asmx/GetSearchPlayer"
+                    , dataType: "json"
+                    , data: {
+                        name: $("#txtTopPlayerWord").val()
+                    }
+                    , error: ajaxFailed
+                    , async: true
+                });
+
+                request.done(function (data) {
+                    if (data.code == "100") {
+                        var container = $(".search-result");
+                        container.children().remove();
+
+                        container.hide();
+
+                        if (data.now.length > 0 || data.retire.length > 0) {
+                            // 2017-05-22 yeeun, ���吏���� ��ъ�� ���泥�, 寃곌낵媛� 1紐���� 寃쎌�� 諛�濡� �����댁�� ��곌껐
+                            if (data.now.length + data.retire.length == 1) {
+                                var link = "";
+
+                                if (data.now.length == 1) {
+                                    link = data.now[0]["P_LINK"];
+                                } else {
+                                    link = data.retire[0]["P_LINK"];
+                                }
+
+                                location.href = link;
+                            } else {
+                                if (data.now.length > 0) {
+                                    container.append($("<h4>��깅�� ������</h4>"));
+
+                                    var div = $("<div class='active' />");
+                                    div.children().remove();
+
+                                    setPlayerDiv(data.now, div, true);
+
+                                    container.append(div);
+                                }
+
+                                if (data.retire.length > 0) {
+                                    container.append($("<h4>������ ������</h4>"));
+
+                                    var div = $("<div class='retire'/>");
+                                    div.children().remove();
+
+                                    setPlayerDiv(data.retire, div, false);
+
+                                    container.append(div);
+                                }
+
+                                //container.append($(String.format("<p><a href='/Player/Search.aspx?searchWord={0}''>'{0}' 寃����寃곌낵 紐⑤�� 蹂닿린</a></p>", $("#txtTopPlayerWord").val())));
+                                container.append($("<p><a href='/Player/Search.aspx?searchWord=" + $("#txtTopPlayerWord").val() + "''>'" + $("#txtTopPlayerWord").val() + "' 寃����寃곌낵 紐⑤�� 蹂닿린</a></p>"));
+                                container.show();
+                            }
+                        } else {
+                            container.append($("<p class='null'>寃���� 寃곌낵媛� �����듬�����.</p>"));
+                            container.show();
+                        }
+                    }
+                });
+            }
+        }
+
+        // ������ 寃���� div 
+        function setPlayerDiv(list, div, isActive) {
+            $.each(list, function (index, player) {
+                var aLink = $("<a />");
+                aLink.attr("href", player["P_LINK"]);
+
+                var dl = $("<dl />");
+                var dt = $("<dt />");
+                var backNo = "";
+
+                if (isActive) {
+                    //backNo = String.format("No.{0}", player["BACK_NO"]);
+                    backNo = "No." + player["BACK_NO"];
+                }
+
+                //dt.text(String.format("{0} {1}", player["P_NM"], backNo));
+                dt.text(player["P_NM"] + " " + backNo);
+                dl.append(dt);
+
+                var dd = $("<dd />");
+                //dd.text(String.format("{0} {1}({2})", player["T_NM"], player["POS_NO"], player["P_TYPE"]));
+                dd.text(player["T_NM"] + " " + player["POS_NO"] + "(" + player["P_TYPE"] + ")");
+                dl.append(dd);
+
+                var ddImg = $(String.format("<dd class='btn-arrow'><img src='{0}/resources/images/common/btn_arrow_search.png' alt='' /></dd>", "//6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/KBOHome"));
+                dl.append(ddImg);
+
+                aLink.append(dl);
+                div.append(aLink);
+            });
+        }
+    </script>
+</body>
+</html>

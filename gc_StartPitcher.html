@@ -1,0 +1,201 @@
+
+    	
+<div class="tab-depth2">
+	<ul class="tab" id="tabPreview">
+		
+	</ul>
+</div>
+
+<h5 class="sub-tit">���諛���ъ�� �����λ�����</h5>
+					
+<div class="tab-depth3 mb0">
+	<ul class="tab">
+		<li class="on"><a href="#none" attr-value="SEASON">���利�</a>|</li>
+		<li><a href="#none" attr-value="HOMEAWAY">���/������</a>|</li>
+		<li><a href="#none" attr-value="VS">留����寃�</a></li>
+	</ul>
+</div>
+
+<h6 class="mt20">湲곕�� 鍮�援�</h6>
+
+<div class="sub-script row mb5">						
+	
+</div>
+					
+<div class="tbl-pitcher mb50" id="makeStartPitcher">
+	
+</div>
+
+<h6 class="mb10">二쇱�� 援ъ�� 遺����</h6>
+					
+<div class="tbl-type05 tbl-pitcher">
+	<table class="tbl" id="tblPitKind" summary="二쇱�� 援ъ�� 遺���� ��� (吏�援�, ��깆빱, 泥댁�몄�����, ��щ�쇱�대��)">
+		<caption>二쇱�� 援ъ�� 遺���� ���</caption>
+		<colgroup>
+			<col width="20%" />
+			<col width="18%" />
+			<col width="15%" />
+			<col width="15%" />
+			<col width="15%" />
+			<col width="15%" />
+		</colgroup>
+	</table>
+</div>
+    
+<script type="text/javascript">
+    var group = "SEASON";
+
+    $(document).ready(function () {
+        getRecordTableGrid();   // ��ъ��湲곕��
+        getKindTableGrid();     // 二쇱��援ъ��遺���� 
+    });
+
+    // ���������
+    $(".tab-depth3 > ul > li").click(function (e) {
+        e.preventDefault();
+        $(this).addClass("on").siblings().removeClass("on");
+        group = $(this).find("> a").attr("attr-value");
+
+        getRecordTableGrid();   // ��ъ��湲곕��
+        getKindTableGrid();     // 二쇱��援ъ��遺����
+    });
+
+    // 湲곕��鍮�援�
+    function getRecordTableGrid() {
+        var gameId = $(".game-list-n > li.on").attr("g_id");
+        var leId = $(".game-list-n > li.on").attr("le_id");
+        var srId = $(".game-list-n > li.on").attr("sr_id");
+        var seasonId = $(".game-list-n > li.on").attr("season");
+        var awayTeamId = $(".game-list-n > li.on").attr("away_id");
+        var homeTeamId = $(".game-list-n > li.on").attr("home_id");
+        var awayPitId = $(".game-list-n > li.on").attr("away_p_id");
+        var homepitId = $(".game-list-n > li.on").attr("home_p_id");
+        var url = "/ws/Schedule.asmx/GetPitcherRecordAnalysis";
+
+        if (srId == 4 || srId == 3 || srId == 5 || srId == 7) {
+            url = "/ws/Schedule.asmx/GetPitcherRecordAnalysisPost";
+        }
+
+        
+        var request = $.ajax({
+            type: "post"
+            , url: url
+            , dataType: "json"
+            , data: {
+                leId: leId
+                , srId: srId
+                , seasonId: seasonId
+                , awayTeamId: awayTeamId
+                , awayPitId: awayPitId
+                , homeTeamId: homeTeamId
+                , homePitId: homepitId
+                , groupSc: group
+            }
+            , async: false
+        });
+
+        request.done(function (data) {
+            $("#makeStartPitcher").S2iMakeTable(
+            {
+                colgroup: data.colgroup
+                , header: data.headers
+            });
+
+            $("#makeStartPitcher").children("table").addClass("tbl").attr("id", "tblStartPitcher");
+
+            $("#tblStartPitcher").S2iGridTable(
+            {
+                rows: data.rows
+            });
+        });
+
+        // 湲곕��鍮�援�
+        // era
+        if (($(".td_era_T").text() != undefined && $(".td_era_T").text() != "-") && ($(".td_era_B").text() != undefined && $(".td_era_B").text() != "-")) {
+            if (parseFloat($(".td_era_T").text()) < parseFloat($(".td_era_B").text())) {
+                $(".td_era_T").addClass("win");
+            } else if (parseFloat($(".td_era_T").text()) > parseFloat($(".td_era_B").text())) {
+                $(".td_era_B").addClass("win");
+            }
+        }
+
+        // war
+        if (($(".td_war_T").text() != undefined && $(".td_war_T").text() != "-") && ($(".td_war_B").text() != undefined && $(".td_war_B").text() != "-")) {
+            if (parseFloat($(".td_war_T").text()) < parseFloat($(".td_war_B").text())) {
+                $(".td_war_B").addClass("win");
+            } else if (parseFloat($(".td_war_T").text()) > parseFloat($(".td_war_B").text())) {
+                $(".td_war_T").addClass("win");
+            }
+        }
+
+        // 寃쎄린
+        if (($(".td_game_T").text() != undefined && $(".td_game_T").text() != "-") && ($(".td_game_B").text() != undefined && $(".td_game_B").text() != "-")) {
+            if (parseFloat($(".td_game_T").text()) < parseFloat($(".td_game_B").text())) {
+                $(".td_game_B").addClass("win");
+            } else if (parseFloat($(".td_game_T").text()) > parseFloat($(".td_game_B").text())) {
+                $(".td_game_T").addClass("win");
+            }
+        }
+
+        // ���諛����洹���대��
+        if (($(".td_startInn_T").text() != undefined && $(".td_startInn_T").text() != "-") && ($(".td_startInn_B").text() != undefined && $(".td_startInn_B").text() != "-")) {
+            if (parseFloat($(".td_startInn_T").text()) < parseFloat($(".td_startInn_B").text())) {
+                $(".td_startInn_B").addClass("win");
+            } else if (parseFloat($(".td_startInn_T").text()) > parseFloat($(".td_startInn_B").text())) {
+                $(".td_startInn_T").addClass("win");
+            }
+        }
+
+        // QS
+        if (($(".td_qs_T").text() != undefined && $(".td_qs_T").text() != "-") && ($(".td_qs_B").text() != undefined && $(".td_qs_B").text() != "-")) {
+            if (parseFloat($(".td_qs_T").text()) < parseFloat($(".td_qs_B").text())) {
+                $(".td_qs_B").addClass("win");
+            } else if (parseFloat($(".td_qs_T").text()) > parseFloat($(".td_qs_B").text())) {
+                $(".td_qs_T").addClass("win");
+            }
+        }
+
+        // WHIP
+        if (($(".td_whip_T").text() != undefined && $(".td_whip_T").text() != "-") && ($(".td_whip_B").text() != undefined && $(".td_whip_B").text() != "-")) {
+            if (parseFloat($(".td_whip_T").text()) < parseFloat($(".td_whip_B").text())) {
+                $(".td_whip_T").addClass("win");
+            } else if (parseFloat($(".td_whip_T").text()) > parseFloat($(".td_whip_B").text())) {
+                $(".td_whip_B").addClass("win");
+            }
+        }
+    }
+
+    // 二쇱��援ъ��遺���� (異����������吏����, 由ш렇, ���由ъ�� request)
+    function getKindTableGrid() {
+        var seasonId = $(".game-list-n > li.on").attr("season");
+        var leId = $(".game-list-n > li.on").attr("le_id");
+        var srId = $(".game-list-n > li.on").attr("sr_id");
+        var awayPitId = $(".game-list-n > li.on").attr("away_p_id");
+        var homepitId = $(".game-list-n > li.on").attr("home_p_id");
+
+        if (srId == 4 || srId == 3 || srId == 5 || srId == 7) {
+            srId = 0;
+        }
+
+        var request = $.ajax({
+            type: "post"
+            , url: "/ws/Schedule.asmx/GetPitKindAnalysis"
+            , dataType: "json"
+            , data: {
+                leId: leId
+                , srId: srId
+                , seasonId: seasonId
+                , awayPitId: awayPitId
+                , homePitId: homepitId
+            }
+            , async: false
+        });
+
+        request.done(function (data) {
+            $("#tblPitKind").S2iGridTable(
+            {
+                rows: data.rows
+            });
+        });
+    }
+</script>

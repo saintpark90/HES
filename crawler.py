@@ -4,6 +4,7 @@ import json
 import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 import xml.etree.ElementTree as ET
 import time
 from zoneinfo import ZoneInfo
@@ -43,6 +44,55 @@ OPENMETEO_AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quali
 KST = ZoneInfo("Asia/Seoul")
 _HANWHA_SEASON_SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
 _HANWHA_SEASON_SCHEDULE_CACHE_TTL_SEC = 60 * 30
+_NAMU_WIKI_MONTH_CACHE: Dict[str, Dict[str, Any]] = {}
+_NAMU_WIKI_MONTH_CACHE_TTL_SEC = 60 * 30
+NAMU_WIKI_BASE_URL = "https://namu.wiki/w/"
+KBO_ID_TO_NAMU_TEAM_SHORT = {
+    "HH": "한화",
+    "NC": "NC",
+    "KT": "KT",
+    "HT": "KIA",
+    "SK": "SSG",
+    "SS": "삼성",
+    "LT": "롯데",
+    "WO": "키움",
+    "LG": "LG",
+    "OB": "두산",
+}
+_NAMU_TEAM_SHORTS = set(KBO_ID_TO_NAMU_TEAM_SHORT.values())
+_NAMU_INVALID_STARTER_TOKENS = {
+    "",
+    "-",
+    "미정",
+    "TBD",
+    "예정",
+    "선발",
+    "투수",
+    "타순",
+    "선수명",
+    "포지션",
+    "등록",
+    "말소",
+    "팀",
+    "중계채널",
+    "캐스터",
+    "해설",
+    "결승타",
+    "홈런",
+    "실책",
+    "도루",
+    "도루자",
+    "한화",
+    "NC",
+    "KT",
+    "KIA",
+    "SSG",
+    "삼성",
+    "롯데",
+    "키움",
+    "LG",
+    "두산",
+}
 
 
 def _kbo_api_headers() -> Dict[str, str]:
@@ -385,6 +435,125 @@ def _extract_hanwha_starter(game: Dict[str, Any]) -> str:
 def _is_missing_starter_name(name: str) -> bool:
     token = (name or "").strip()
     return token in {"", "-", "미정", "TBD", "예정"}
+
+
+def _namu_wiki_month_page_url(target: date) -> str:
+    path = f"한화 이글스/{target.year}년/{target.month}월"
+    return f"{NAMU_WIKI_BASE_URL}{quote(path)}"
+
+
+def _fetch_namu_wiki_month_html(target: date) -> str:
+    cache_key = f"{target.year}-{target.month:02d}"
+    now_ts = time.time()
+    cached = _NAMU_WIKI_MONTH_CACHE.get(cache_key) or {}
+    cached_at = float(cached.get("cached_at", 0.0) or 0.0)
+    if cached and (now_ts - cached_at) <= _NAMU_WIKI_MONTH_CACHE_TTL_SEC:
+        html = cached.get("html")
+        if isinstance(html, str) and html:
+            return html
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ko-KR,ko;q=0.9",
+    }
+    try:
+        response = _http_get_with_retries(
+            _namu_wiki_month_page_url(target),
+            headers=headers,
+            timeout=20,
+        )
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        html = response.text or ""
+    except Exception:
+        return ""
+
+    _NAMU_WIKI_MONTH_CACHE[cache_key] = {"cached_at": now_ts, "html": html}
+    return html
+
+
+def _is_valid_namu_starter_name(name: str) -> bool:
+    token = (name or "").strip()
+    if not token or token in _NAMU_INVALID_STARTER_TOKENS:
+        return False
+    if len(token) > 24:
+        return False
+    if re.fullmatch(r"\d+", token):
+        return False
+    if re.search(r"(차전|ERA|시즌|기록|편집|회|위|G\b|VS\b|프리뷰|라인업)", token):
+        return False
+    if not re.fullmatch(r"[A-Za-z가-힣·.\-\s]{2,24}", token):
+        return False
+    return True
+
+
+def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
+    """
+    Parse {team_short: pitcher_name} from the per-game section on the monthly wiki page.
+    """
+    if not html:
+        return {}
+
+    month, day = target.month, target.day
+    markers = [
+        f"한화 이글스 {month}월 {day}일 선발",
+        f"{month}월 {day}일 선발 라인업",
+    ]
+    idx = -1
+    for marker in markers:
+        idx = html.find(marker)
+        if idx >= 0:
+            break
+    if idx < 0:
+        day_pat = re.compile(rf"{month}\s*월\s*{day}\s*일")
+        for match in day_pat.finditer(html):
+            chunk = html[match.start() : match.start() + 120]
+            if "선발" in chunk or "라인업" in chunk:
+                idx = match.start()
+                break
+    if idx < 0:
+        return {}
+
+    chunk = html[idx : idx + 25000]
+    plain = re.sub(r"<[^>]+>", "|", chunk)
+    parts = [part.strip() for part in plain.split("|") if part.strip()]
+
+    starters: Dict[str, str] = {}
+    for idx_part, part in enumerate(parts):
+        if part not in _NAMU_TEAM_SHORTS:
+            continue
+        if idx_part + 1 >= len(parts):
+            continue
+        candidate = parts[idx_part + 1].strip()
+        if not _is_valid_namu_starter_name(candidate):
+            continue
+        starters.setdefault(part, candidate)
+        if len(starters) >= 2:
+            break
+    return starters
+
+
+def _fetch_namu_wiki_starters_for_game(
+    target: date, away_team_id: str, home_team_id: str
+) -> Dict[str, str]:
+    html = _fetch_namu_wiki_month_html(target)
+    by_team = _parse_namu_starters_for_date(html, target)
+    if not by_team:
+        return {}
+
+    away_short = KBO_ID_TO_NAMU_TEAM_SHORT.get(str(away_team_id or "").strip(), "")
+    home_short = KBO_ID_TO_NAMU_TEAM_SHORT.get(str(home_team_id or "").strip(), "")
+    away_starter = by_team.get(away_short, "")
+    home_starter = by_team.get(home_short, "")
+    if not away_starter and not home_starter:
+        return {}
+    return {
+        "away_starter": away_starter,
+        "home_starter": home_starter,
+    }
 
 
 def _face_image_url(season_id: str, player_id: str) -> str:
@@ -2827,6 +2996,18 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                     home_starter_id = str(latest_game.get("B_PIT_P_ID") or home_starter_id)
                     away_starter = (latest_game.get("T_PIT_P_NM") or "").strip() or away_starter
                     home_starter = (latest_game.get("B_PIT_P_NM") or "").strip() or home_starter
+
+            # Namu wiki fallback when KBO still shows 미정 (names only; stats via KBO search below).
+            if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
+                namu_starters = _fetch_namu_wiki_starters_for_game(
+                    target,
+                    str(game.get("AWAY_ID", "")),
+                    str(game.get("HOME_ID", "")),
+                )
+                if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
+                    away_starter = namu_starters["away_starter"]
+                if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
+                    home_starter = namu_starters["home_starter"]
 
             # Final fallback: resolve starter IDs by name via player search endpoint.
             if not away_starter_id:
