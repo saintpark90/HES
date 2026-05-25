@@ -13,6 +13,54 @@ let sunShadeImgLoadToken = 0;
 
 if (!container) throw new Error("game-content container not found");
 
+const THEME_STORAGE_KEY = "hes-theme";
+
+const getPreferredTheme = () => {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "dark" || stored === "light") return stored;
+  } catch (err) {
+    // localStorage unavailable (private mode, etc.)
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+};
+
+const applyTheme = (theme) => {
+  if (theme === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+};
+
+const updateThemeToggleButton = (btn) => {
+  if (!btn) return;
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  btn.setAttribute("aria-label", isDark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  btn.setAttribute("title", isDark ? "라이트 모드" : "다크 모드");
+  btn.textContent = isDark ? "☀️" : "🌙";
+};
+
+const bindThemeToggle = () => {
+  const btn = document.querySelector(".card-theme-toggle");
+  if (!btn || btn.dataset.bound === "1") return;
+  btn.dataset.bound = "1";
+  updateThemeToggleButton(btn);
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch (err) {
+      // ignore
+    }
+    updateThemeToggleButton(btn);
+  });
+};
+
+applyTheme(getPreferredTheme());
+bindThemeToggle();
+
 const isStarterUndecided = (name) => {
   const t = String(name || "").trim();
   return !t || t === "-" || t === "미정" || t === "TBD" || t === "예정";
@@ -44,6 +92,30 @@ const renderPitcherCard = (teamLabel, name, image, stats, emblemUrl) => {
         </div>
       </div>
     </article>
+  `;
+};
+
+const renderMatchupRow = (g) => {
+  const tc = g?.team_comparison;
+  const awayEmblem = tc?.away_emblem || "";
+  const homeEmblem = tc?.home_emblem || "";
+  const awayName = g?.away_team || "";
+  const homeName = g?.home_team || "";
+  const fallback = g?.matchup || `${awayName} vs ${homeName}`.trim();
+  if (!awayName && !homeName) {
+    return `<div class="row row--matchup"><span class="label">대진:</span><span class="matchup-value">${fallback}</span></div>`;
+  }
+  return `
+    <div class="row row--matchup">
+      <span class="label">대진:</span>
+      <span class="matchup-value">
+        ${awayEmblem ? `<img src="${awayEmblem}" alt="${awayName} 엠블럼" class="matchup-emblem" loading="lazy" />` : ""}
+        <span class="matchup-team">${awayName}</span>
+        <span class="matchup-vs">vs</span>
+        ${homeEmblem ? `<img src="${homeEmblem}" alt="${homeName} 엠블럼" class="matchup-emblem" loading="lazy" />` : ""}
+        <span class="matchup-team">${homeName}</span>
+      </span>
+    </div>
   `;
 };
 
@@ -1217,11 +1289,9 @@ const renderGame = (g, refreshedAt) => {
       <div class="game-meta-cols">
         <div class="row"><span class="label">경기일:</span>${formatGameDateWithWeekday(g.game_date, g.game_date_ymd)}</div>
         <div class="row"><span class="label">경기시간:</span>${g.game_time}</div>
-        <div class="row"><span class="label">대진:</span>${g.matchup}</div>
+        ${renderMatchupRow(g)}
         <div class="row"><span class="label">구장:</span>${g.stadium}</div>
         <div class="row"><span class="label">한화 홈/원정:</span>${g.hanwha_home_away}</div>
-        <div class="row"><span class="label">상대팀:</span>${g.opponent}</div>
-        <div class="row"><span class="label">한화 선발투수:</span>${g.hanwha_starter}</div>
       </div>
       <div class="game-pitcher-cols sub">
         <div class="pitcher-grid">
