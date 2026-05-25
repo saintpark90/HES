@@ -274,7 +274,7 @@ h1 {
 
 .pitcher-body h3 {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--hes-text);
   white-space: nowrap;
   overflow: hidden;
@@ -290,7 +290,7 @@ h1 {
 
 .starter-profile {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--hes-text-muted);
 }
 
@@ -361,7 +361,7 @@ h1 {
   }
 
   .starter-record {
-    font-size: 11px;
+    font-size: 15px;
     margin: 0 0 5px;
   }
 
