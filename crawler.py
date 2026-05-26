@@ -2974,6 +2974,77 @@ def _get_hanwha_season_schedule_cached(season_id: str) -> list[Dict[str, Any]]:
     return data
 
 
+def _resolve_game_starter_names(
+    game: Dict[str, Any], target: date
+) -> tuple[str, str, str, str]:
+    """Resolve away/home starter names (and IDs) using the same fallbacks as get_next_hanwha_game."""
+    away_starter = (game.get("T_PIT_P_NM") or "").strip() or "미정"
+    home_starter = (game.get("B_PIT_P_NM") or "").strip() or "미정"
+    away_starter_id = str(game.get("T_PIT_P_ID") or "")
+    home_starter_id = str(game.get("B_PIT_P_ID") or "")
+    season_id = str(game.get("SEASON_ID", ""))
+    game_id = str(game.get("G_ID", ""))
+    sr_id = str(game.get("SR_ID", "0"))
+
+    if game_id and (_is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter)):
+        live_starters = _fetch_live_starter_names(game_id=game_id, season_id=season_id, sr_id=sr_id)
+        away_starter = live_starters.get("away_starter", away_starter)
+        home_starter = live_starters.get("home_starter", home_starter)
+
+    if game_id and (
+        not away_starter_id
+        or not home_starter_id
+        or _is_missing_starter_name(away_starter)
+        or _is_missing_starter_name(home_starter)
+    ):
+        latest_game = _fetch_game_by_game_id(game_id)
+        if latest_game:
+            away_starter_id = str(latest_game.get("T_PIT_P_ID") or away_starter_id)
+            home_starter_id = str(latest_game.get("B_PIT_P_ID") or home_starter_id)
+            away_starter = (latest_game.get("T_PIT_P_NM") or "").strip() or away_starter
+            home_starter = (latest_game.get("B_PIT_P_NM") or "").strip() or home_starter
+
+    if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
+        namu_starters = _fetch_namu_wiki_starters_for_game(
+            target,
+            str(game.get("AWAY_ID", "")),
+            str(game.get("HOME_ID", "")),
+        )
+        if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
+            away_starter = namu_starters["away_starter"]
+        if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
+            home_starter = namu_starters["home_starter"]
+
+    away_starter = away_starter.strip() if away_starter else ""
+    home_starter = home_starter.strip() if home_starter else ""
+    if _is_missing_starter_name(away_starter):
+        away_starter = "미정"
+    if _is_missing_starter_name(home_starter):
+        home_starter = "미정"
+    return away_starter, home_starter, away_starter_id, home_starter_id
+
+
+def _game_both_starters_published(game: Dict[str, Any], target: date) -> bool:
+    away_starter, home_starter, _, _ = _resolve_game_starter_names(game, target)
+    return not _is_missing_starter_name(away_starter) and not _is_missing_starter_name(home_starter)
+
+
+def _find_hanwha_game_with_published_starters_on_date(target: date) -> Optional[Dict[str, Any]]:
+    """Next scheduled Hanwha game on ``target`` where both starters are known."""
+    try:
+        games = _fetch_games(target)
+    except Exception:
+        return None
+    for game in games:
+        if not _is_hanwha_game(game):
+            continue
+        if _is_cancelled_game(game):
+            continue
+        if _game_both_starters_published(game, target):
+            return game
+    return None
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
@@ -2991,8 +3062,11 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             # Skip today's game once it is over so "다음 경기" is tomorrow (KST). SCORE_CK can appear
             # before the first pitch; only treat non-scheduled(1) finished scores as "done".
             if offset == 0:
-                # 우천취소 등: 다음 경기로 넘기지 않고 당일 경기를 유지한다.
-                if not _is_cancelled_game(game):
+                if _is_cancelled_game(game):
+                    # 우천취소 등: 익일 경기 선발이 공개돼 있으면 익일 경기를 메인으로 표시한다.
+                    if _find_hanwha_game_with_published_starters_on_date(target + timedelta(days=1)):
+                        continue
+                else:
                     if _is_final_game(game):
                         continue
                     if _is_finished_game(game) and not _is_live_game(game):
@@ -3001,59 +3075,18 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
 
             is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
             opponent_name = game.get("HOME_NM") if is_away else game.get("AWAY_NM")
-            away_starter = (game.get("T_PIT_P_NM") or "").strip() or "미정"
-            home_starter = (game.get("B_PIT_P_NM") or "").strip() or "미정"
-            away_starter_id = str(game.get("T_PIT_P_ID") or "")
-            home_starter_id = str(game.get("B_PIT_P_ID") or "")
             season_id = str(game.get("SEASON_ID", ""))
             game_id = str(game.get("G_ID", ""))
             sr_id = str(game.get("SR_ID", "0"))
-
-            # Starter-name fallback: LiveText often has names earlier than game list payload.
-            is_live_game = _is_live_game(game)
-            if game_id and (_is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter)):
-                live_starters = _fetch_live_starter_names(game_id=game_id, season_id=season_id, sr_id=sr_id)
-                away_starter = live_starters.get("away_starter", away_starter)
-                home_starter = live_starters.get("home_starter", home_starter)
-
-            # Reload by gameId/date when IDs or names are still missing.
-            if game_id and (
-                not away_starter_id
-                or not home_starter_id
-                or _is_missing_starter_name(away_starter)
-                or _is_missing_starter_name(home_starter)
-            ):
-                latest_game = _fetch_game_by_game_id(game_id)
-                if latest_game:
-                    away_starter_id = str(latest_game.get("T_PIT_P_ID") or away_starter_id)
-                    home_starter_id = str(latest_game.get("B_PIT_P_ID") or home_starter_id)
-                    away_starter = (latest_game.get("T_PIT_P_NM") or "").strip() or away_starter
-                    home_starter = (latest_game.get("B_PIT_P_NM") or "").strip() or home_starter
-
-            # Namu wiki fallback when KBO still shows 미정 (names only; stats via KBO search below).
-            if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
-                namu_starters = _fetch_namu_wiki_starters_for_game(
-                    target,
-                    str(game.get("AWAY_ID", "")),
-                    str(game.get("HOME_ID", "")),
-                )
-                if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
-                    away_starter = namu_starters["away_starter"]
-                if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
-                    home_starter = namu_starters["home_starter"]
+            away_starter, home_starter, away_starter_id, home_starter_id = _resolve_game_starter_names(
+                game, target
+            )
 
             # Final fallback: resolve starter IDs by name via player search endpoint.
             if not away_starter_id:
                 away_starter_id = _resolve_pitcher_id_from_search(away_starter, str(game.get("AWAY_ID", "")))
             if not home_starter_id:
                 home_starter_id = _resolve_pitcher_id_from_search(home_starter, str(game.get("HOME_ID", "")))
-
-            away_starter = away_starter.strip() if away_starter else ""
-            home_starter = home_starter.strip() if home_starter else ""
-            if _is_missing_starter_name(away_starter):
-                away_starter = "미정"
-            if _is_missing_starter_name(home_starter):
-                home_starter = "미정"
 
             hanwha_starter = away_starter if is_away else home_starter
             if _is_missing_starter_name(hanwha_starter):
