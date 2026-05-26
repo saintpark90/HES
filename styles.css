@@ -163,6 +163,15 @@ h1 {
   color: #a64e22;
 }
 
+.live-header--cancelled {
+  background: var(--hes-bg);
+}
+
+.live-inning--cancelled {
+  color: #888;
+  font-weight: 700;
+}
+
 .live-players {
   grid-column: 1 / -1;
   display: flex;

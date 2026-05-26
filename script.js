@@ -122,7 +122,27 @@ const renderMatchupRow = (g) => {
 const renderLiveHeader = (g) => {
   const live = g?.live_status;
   const tc = g?.team_comparison;
-  if (!live?.is_live) return "";
+  if (!live) return "";
+  if (live.is_cancelled) {
+    const cancelLabel = live.cancel_label || "경기 취소";
+    return `
+    <section class="live-header live-header--cancelled">
+      <div class="live-team">
+        <img src="${tc?.away_emblem || ""}" alt="${g.away_team}" class="live-emblem" />
+        <span>${g.away_team}</span>
+      </div>
+      <div class="live-score-wrap">
+        <div class="live-score">${live.away_score || "0"} : ${live.home_score || "0"}</div>
+        <div class="live-inning live-inning--cancelled">${escapeHtml(cancelLabel)}</div>
+      </div>
+      <div class="live-team">
+        <img src="${tc?.home_emblem || ""}" alt="${g.home_team}" class="live-emblem" />
+        <span>${g.home_team}</span>
+      </div>
+    </section>
+  `;
+  }
+  if (!live.is_live) return "";
   return `
     <section class="live-header">
       <div class="live-team">
@@ -1199,6 +1219,8 @@ const getOpponentEmblemUrl = (seasonId, opponentTeamId) => {
 };
 
 const formatLeagueResultLabel = (row) => {
+  const cancelLabel = String(row?.cancel_label || "").trim();
+  if (cancelLabel) return cancelLabel;
   const res = String(row?.result || "").trim();
   if (res === "취소" || res === "무" || res === "진행중") return res;
   if (res === "원정승") return `${row.away_team || "원정"} 승`;
@@ -1231,14 +1253,21 @@ const renderLeagueResultsSection = (g) => {
       const homeEm = getOpponentEmblemUrl(sid, row.home_team_id);
       const linkUrl = getScheduleCardLinkUrl(row, sid);
       const res = row.result || "";
+      const cancelLabel = String(row.cancel_label || "").trim();
+      const isCancel = res === "취소" || Boolean(cancelLabel);
       const resLabel = formatLeagueResultLabel(row);
       let resClass = "yesterday-league-result";
-      if (res === "취소") resClass += " yesterday-league-result--cancel";
+      if (isCancel) resClass += " yesterday-league-result--cancel";
       else if (res === "무") resClass += " yesterday-league-result--draw";
       else if (res === "진행중") resClass += " yesterday-league-result--live";
       else if (res === "원정승") resClass += " yesterday-league-result--away";
       else if (res === "홈승") resClass += " yesterday-league-result--home";
-      const scoreText = res === "취소" ? "—" : `${row.away_score ?? "-"} : ${row.home_score ?? "-"}`;
+      const hasScore =
+        row.away_score !== "" &&
+        row.away_score != null &&
+        row.home_score !== "" &&
+        row.home_score != null;
+      const scoreText = isCancel && !hasScore ? "—" : `${row.away_score ?? "-"} : ${row.home_score ?? "-"}`;
       const classes = ["yesterday-league-card"];
       if (linkUrl) classes.push("yesterday-league-card--clickable");
       const awayW = res === "원정승" ? " yesterday-league-side--winner" : "";
@@ -1329,6 +1358,7 @@ const renderGame = (g, refreshedAt) => {
 const shouldStartPolling = (g) => {
   if (!g) return false;
   if (g?.live_status?.is_live) return true;
+  if (g?.live_status?.is_cancelled) return true;
 
   const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const todayKst = nowKst.toISOString().slice(0, 10);

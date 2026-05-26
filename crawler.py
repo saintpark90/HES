@@ -576,9 +576,28 @@ def _is_final_game(game: Dict[str, Any]) -> bool:
     return str(game.get("GAME_STATE_SC", "")) in {"3", "4"}
 
 
+def _is_cancelled_game(game: Dict[str, Any]) -> bool:
+    cancel_id = str(game.get("CANCEL_SC_ID", "") or "").strip()
+    cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
+    if cancel_id and cancel_id not in {"0"}:
+        return True
+    return "취소" in cancel_name
+
+
+def _game_cancel_label(game: Dict[str, Any]) -> str:
+    if not _is_cancelled_game(game):
+        return ""
+    cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
+    if "우천" in cancel_name:
+        return "우천취소"
+    return cancel_name or "취소"
+
+
 def _build_live_status(game: Dict[str, Any], away_team: str, home_team: str) -> Dict[str, Any]:
-    is_live = _is_live_game(game)
-    is_final = _is_final_game(game)
+    is_cancelled = _is_cancelled_game(game)
+    cancel_label = _game_cancel_label(game)
+    is_live = _is_live_game(game) and not is_cancelled
+    is_final = _is_final_game(game) or is_cancelled
     top_bottom = str(game.get("GAME_TB_SC", "") or "")
     inning_no = str(game.get("GAME_INN_NO", "") or "").strip()
     inning_half = "초" if top_bottom == "T" else "말" if top_bottom == "B" else ""
@@ -608,6 +627,8 @@ def _build_live_status(game: Dict[str, Any], away_team: str, home_team: str) -> 
     return {
         "is_live": is_live,
         "is_final": is_final,
+        "is_cancelled": is_cancelled,
+        "cancel_label": cancel_label,
         "away_score": away_score,
         "home_score": home_score,
         "inning_text": inning_text,
@@ -2761,9 +2782,7 @@ def _resolve_hanwha_series(target_date: date, target_opponent: str, max_days_ahe
 
 
 def _hanwha_game_result(game: Dict[str, Any]) -> str:
-    cancel_id = str(game.get("CANCEL_SC_ID", "") or "").strip()
-    cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
-    if (cancel_id and cancel_id not in {"0"}) or ("취소" in cancel_name):
+    if _is_cancelled_game(game):
         return "취소"
     if not _is_final_game(game):
         return ""
@@ -2803,9 +2822,10 @@ def _serialize_hanwha_schedule_game(game: Dict[str, Any], target_date: date) -> 
         "home_score": home_score,
         "hanwha_score": hanwha_score,
         "opponent_score": opponent_score,
-        "is_live": state == "2",
-        "is_final": state in {"3", "4"},
+        "is_live": state == "2" and not _is_cancelled_game(game),
+        "is_final": state in {"3", "4"} or _is_cancelled_game(game),
         "result": _hanwha_game_result(game),
+        "cancel_label": _game_cancel_label(game),
     }
 
 
@@ -2836,9 +2856,7 @@ def _collect_hanwha_season_schedule(
 
 def _league_game_outcome_label(game: Dict[str, Any]) -> str:
     """전 구단 경기 카드용: 원정승 / 홈승 / 무 / 취소 / 진행중 / 미표시(빈 문자열)."""
-    cancel_id = str(game.get("CANCEL_SC_ID", "") or "").strip()
-    cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
-    if (cancel_id and cancel_id not in {"0"}) or ("취소" in cancel_name):
+    if _is_cancelled_game(game):
         return "취소"
     if _is_live_game(game):
         return "진행중"
@@ -2863,12 +2881,13 @@ def _serialize_yesterday_league_game_row(
     home_id = str(game.get("HOME_ID", "") or "").strip()
     season_id = str(game.get("SEASON_ID", "") or "").strip() or season_fallback
     state = str(game.get("GAME_STATE_SC", "") or "").strip()
-    is_live = state == "2"
-    is_final = state in {"3", "4"}
+    is_live = state == "2" and not _is_cancelled_game(game)
+    is_final = state in {"3", "4"} or _is_cancelled_game(game)
     outcome = _league_game_outcome_label(game)
+    cancel_label = _game_cancel_label(game) if outcome == "취소" else ""
     away_score = str(game.get("T_SCORE_CN", "") or "").strip()
     home_score = str(game.get("B_SCORE_CN", "") or "").strip()
-    if outcome == "취소":
+    if outcome == "취소" and not away_score and not home_score:
         away_score, home_score = "", ""
     elif outcome in {"", "진행중"} and not away_score and not home_score:
         away_score, home_score = "-", "-"
@@ -2887,6 +2906,7 @@ def _serialize_yesterday_league_game_row(
         "is_live": is_live,
         "is_final": is_final,
         "result": outcome,
+        "cancel_label": cancel_label,
         "home_away": "",
     }
 
@@ -2971,11 +2991,13 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             # Skip today's game once it is over so "다음 경기" is tomorrow (KST). SCORE_CK can appear
             # before the first pitch; only treat non-scheduled(1) finished scores as "done".
             if offset == 0:
-                if _is_final_game(game):
-                    continue
-                if _is_finished_game(game) and not _is_live_game(game):
-                    if (str(game.get("GAME_STATE_SC", "") or "").strip() != "1"):
+                # 우천취소 등: 다음 경기로 넘기지 않고 당일 경기를 유지한다.
+                if not _is_cancelled_game(game):
+                    if _is_final_game(game):
                         continue
+                    if _is_finished_game(game) and not _is_live_game(game):
+                        if (str(game.get("GAME_STATE_SC", "") or "").strip() != "1"):
+                            continue
 
             is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
             opponent_name = game.get("HOME_NM") if is_away else game.get("AWAY_NM")
