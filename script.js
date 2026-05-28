@@ -483,10 +483,23 @@ const renderWeatherSection = (g) => {
   `;
 };
 
-const renderTeamComparison = (tc, awayName, homeName, headToHead) => {
+const buildHanwhaRecent5FromSchedule = (g) => {
+  const rows = Array.isArray(g?.season_schedule) ? g.season_schedule : [];
+  const results = rows
+    .filter((row) => row && row.is_final && (row.result === "승" || row.result === "패" || row.result === "무"))
+    .slice(-5)
+    .map((row) => row.result);
+  if (results.length === 0) return "";
+  return results.reverse().join("");
+};
+
+const renderTeamComparison = (tc, awayName, homeName, headToHead, g) => {
     if (!tc || !tc.away || !tc.home) return "";
 
     const { away, home } = tc;
+    const hanwhaLast5 = buildHanwhaRecent5FromSchedule(g);
+    const awayLast5 = awayName === "한화" && hanwhaLast5 ? hanwhaLast5 : away.last5;
+    const homeLast5 = homeName === "한화" && hanwhaLast5 ? hanwhaLast5 : home.last5;
 
     const statRow = (label, awayVal, homeVal, awayWin, homeWin) => `
       <tr>
@@ -543,7 +556,7 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead) => {
           <tbody>
             ${statRow("상대전적(시즌)", headToHead?.away_vs_home || "-", headToHead?.home_vs_away || "-", false, false)}
             ${statRow("시즌 성적", away.season_record, home.season_record, false, false)}
-            ${last5Row(away.last5, home.last5)}
+            ${last5Row(awayLast5, homeLast5)}
             ${statRow("평균자책점", away.era, home.era, away.era_win, home.era_win)}
             ${statRow("타율", away.avg, home.avg, away.avg_win, home.avg_win)}
             ${statRow("평균득점", away.runs_scored, home.runs_scored, away.runs_scored_win, home.runs_scored_win)}
@@ -1343,7 +1356,7 @@ const renderGame = (g, refreshedAt) => {
       </div>
     </div>
     ${renderWeatherSection(g)}
-    ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary)}
+    ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary, g)}
     ${renderLeagueResultsSection(g)}
     ${renderLineupSection(g)}
     ${renderRegisterMoveSection(g)}
