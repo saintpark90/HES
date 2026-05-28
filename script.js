@@ -497,15 +497,16 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead) => {
     `;
 
     const last5Row = (awayLast5, homeLast5) => {
-      // KBO `last5` is oldest→newest; the last 승/패/무 is the most recent (오른쪽, 네이버 레드닷과 동일).
+      // KBO `last5` is newest→oldest. Reverse so the rightmost dot is the most recent game.
       const dots = (seq) => {
         const out = [];
         for (const c of String(seq || "")) {
           if (c === "승" || c === "패" || c === "무") out.push(c);
         }
         if (out.length === 0) return "—";
-        const lastI = out.length - 1;
-        return out
+        const ordered = [...out].reverse();
+        const lastI = ordered.length - 1;
+        return ordered
           .map((c, i) => {
             const kind = c === "승" ? "win" : c === "패" ? "loss" : "draw";
             const latest = i === lastI ? " last5-latest" : "";
