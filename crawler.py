@@ -46,6 +46,7 @@ _HANWHA_SEASON_SCHEDULE_CACHE: Dict[str, Dict[str, Any]] = {}
 _HANWHA_SEASON_SCHEDULE_CACHE_TTL_SEC = 60 * 30
 _NAMU_WIKI_MONTH_CACHE: Dict[str, Dict[str, Any]] = {}
 _NAMU_WIKI_MONTH_CACHE_TTL_SEC = 60 * 30
+_PITCHER_NAME_CACHE: Dict[str, str] = {}
 NAMU_WIKI_BASE_URL = "https://namu.wiki/w/"
 KBO_ID_TO_NAMU_TEAM_SHORT = {
     "HH": "한화",
@@ -2279,6 +2280,60 @@ def _build_lineup_info(
     }
 
 
+def _parse_pitcher_name_from_detail_html(html: str) -> str:
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        name_el = soup.find(id=re.compile(r"lblName$", re.I))
+        if name_el:
+            return (name_el.get_text() or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def _fetch_pitcher_name_from_player_id(player_id: str) -> str:
+    """Resolve display name when GetKboGameList has T/B_PIT_P_ID but empty T/B_PIT_P_NM."""
+    pid = str(player_id or "").strip()
+    if not pid or pid.lower() == "none":
+        return ""
+    cached = _PITCHER_NAME_CACHE.get(pid)
+    if isinstance(cached, str) and cached:
+        return cached
+
+    headers = {
+        **_kbo_api_headers(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        response = _http_get_with_retries(
+            PITCHER_DETAIL_URL,
+            params={"playerId": pid},
+            headers=headers,
+            timeout=14,
+            retries=3,
+        )
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        name = _parse_pitcher_name_from_detail_html(response.text)
+    except Exception:
+        name = ""
+
+    if name and not _is_missing_starter_name(name):
+        _PITCHER_NAME_CACHE[pid] = name
+    return name
+
+
+def _resolve_starter_name_with_player_id(name: str, player_id: str) -> str:
+    token = (name or "").strip()
+    if not _is_missing_starter_name(token):
+        return token
+    pid = str(player_id or "").strip()
+    if not pid or pid.lower() == "none":
+        return token
+    resolved = _fetch_pitcher_name_from_player_id(pid)
+    return resolved.strip() if resolved else token
+
+
 def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
     if not player_id:
         return {}
@@ -2314,8 +2369,12 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
     image_url = ""
     birth_date = ""
     age_text = "-"
+    player_name = ""
     try:
         soup = BeautifulSoup(html, "html.parser")
+        player_name = _parse_pitcher_name_from_detail_html(html)
+        if player_name and not _is_missing_starter_name(player_name):
+            _PITCHER_NAME_CACHE[str(player_id).strip()] = player_name
         # KBO player detail uses id like:
         # cphContents_cphContents_cphContents_playerProfile_imgProgile
         profile_img = soup.find(id=re.compile(r"imgProgile$", re.I))
@@ -2341,6 +2400,7 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
         image_url = ""
         birth_date = ""
         age_text = "-"
+        player_name = ""
 
     if image_url.startswith("//"):
         image_url = "https:" + image_url
@@ -2348,6 +2408,7 @@ def _fetch_pitcher_stats(player_id: str) -> Dict[str, str]:
         image_url = "https://www.koreabaseball.com" + image_url
 
     return {
+        "name": player_name,
         "era": basic.get("ERA", "-"),
         "wins": basic.get("W", "-"),
         "losses": basic.get("L", "-"),
@@ -2978,13 +3039,20 @@ def _resolve_game_starter_names(
     game: Dict[str, Any], target: date
 ) -> tuple[str, str, str, str]:
     """Resolve away/home starter names (and IDs) using the same fallbacks as get_next_hanwha_game."""
-    away_starter = (game.get("T_PIT_P_NM") or "").strip() or "미정"
-    home_starter = (game.get("B_PIT_P_NM") or "").strip() or "미정"
-    away_starter_id = str(game.get("T_PIT_P_ID") or "")
-    home_starter_id = str(game.get("B_PIT_P_ID") or "")
+    away_starter = (game.get("T_PIT_P_NM") or "").strip()
+    home_starter = (game.get("B_PIT_P_NM") or "").strip()
+    away_starter_id = str(game.get("T_PIT_P_ID") or "").strip()
+    home_starter_id = str(game.get("B_PIT_P_ID") or "").strip()
+    if away_starter_id.lower() == "none":
+        away_starter_id = ""
+    if home_starter_id.lower() == "none":
+        home_starter_id = ""
     season_id = str(game.get("SEASON_ID", ""))
     game_id = str(game.get("G_ID", ""))
     sr_id = str(game.get("SR_ID", "0"))
+
+    away_starter = _resolve_starter_name_with_player_id(away_starter, away_starter_id)
+    home_starter = _resolve_starter_name_with_player_id(home_starter, home_starter_id)
 
     if game_id and (_is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter)):
         live_starters = _fetch_live_starter_names(game_id=game_id, season_id=season_id, sr_id=sr_id)
@@ -2999,10 +3067,16 @@ def _resolve_game_starter_names(
     ):
         latest_game = _fetch_game_by_game_id(game_id)
         if latest_game:
-            away_starter_id = str(latest_game.get("T_PIT_P_ID") or away_starter_id)
-            home_starter_id = str(latest_game.get("B_PIT_P_ID") or home_starter_id)
+            away_starter_id = str(latest_game.get("T_PIT_P_ID") or away_starter_id).strip()
+            home_starter_id = str(latest_game.get("B_PIT_P_ID") or home_starter_id).strip()
+            if away_starter_id.lower() == "none":
+                away_starter_id = ""
+            if home_starter_id.lower() == "none":
+                home_starter_id = ""
             away_starter = (latest_game.get("T_PIT_P_NM") or "").strip() or away_starter
             home_starter = (latest_game.get("B_PIT_P_NM") or "").strip() or home_starter
+            away_starter = _resolve_starter_name_with_player_id(away_starter, away_starter_id)
+            home_starter = _resolve_starter_name_with_player_id(home_starter, home_starter_id)
 
     if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
         namu_starters = _fetch_namu_wiki_starters_for_game(
@@ -3088,12 +3162,20 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             if not home_starter_id:
                 home_starter_id = _resolve_pitcher_id_from_search(home_starter, str(game.get("HOME_ID", "")))
 
+            away_starter_stats = _fetch_pitcher_stats(away_starter_id)
+            home_starter_stats = _fetch_pitcher_stats(home_starter_id)
+            if _is_missing_starter_name(away_starter):
+                away_starter = (away_starter_stats.get("name") or "").strip() or away_starter
+            if _is_missing_starter_name(home_starter):
+                home_starter = (home_starter_stats.get("name") or "").strip() or home_starter
+            if _is_missing_starter_name(away_starter):
+                away_starter = "미정"
+            if _is_missing_starter_name(home_starter):
+                home_starter = "미정"
+
             hanwha_starter = away_starter if is_away else home_starter
             if _is_missing_starter_name(hanwha_starter):
                 hanwha_starter = _extract_hanwha_starter(game) or "미정"
-
-            away_starter_stats = _fetch_pitcher_stats(away_starter_id)
-            home_starter_stats = _fetch_pitcher_stats(home_starter_id)
             away_team_id = str(game.get("AWAY_ID", ""))
             home_team_id = str(game.get("HOME_ID", ""))
             analysis_stats = _fetch_pitcher_record_analysis(
