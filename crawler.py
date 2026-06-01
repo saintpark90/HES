@@ -47,6 +47,7 @@ _HANWHA_SEASON_SCHEDULE_CACHE_TTL_SEC = 60 * 30
 _NAMU_WIKI_MONTH_CACHE: Dict[str, Dict[str, Any]] = {}
 _NAMU_WIKI_MONTH_CACHE_TTL_SEC = 60 * 30
 _PITCHER_NAME_CACHE: Dict[str, str] = {}
+_PITCHER_BIRTH_YEAR_CACHE: Dict[str, str] = {}
 NAMU_WIKI_BASE_URL = "https://namu.wiki/w/"
 KBO_ID_TO_NAMU_TEAM_SHORT = {
     "HH": "한화",
@@ -537,6 +538,44 @@ def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
     return starters
 
 
+def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dict[str, str]:
+    """
+    Parse {starter_name: birth_year_hint} from namu anchors in the per-game chunk.
+    Example href/title: /w/박준영(2002)
+    """
+    if not html:
+        return {}
+
+    month, day = target.month, target.day
+    markers = [
+        f"한화 이글스 {month}월 {day}일 선발",
+        f"{month}월 {day}일 선발 라인업",
+    ]
+    idx = -1
+    for marker in markers:
+        idx = html.find(marker)
+        if idx >= 0:
+            break
+    if idx < 0:
+        return {}
+
+    chunk = html[idx : idx + 25000]
+    soup = BeautifulSoup(chunk, "html.parser")
+    hints: Dict[str, str] = {}
+    for a in soup.find_all("a"):
+        name = (a.get_text() or "").strip()
+        if not _is_valid_namu_starter_name(name):
+            continue
+        href = str(a.get("href") or "")
+        title = str(a.get("title") or "")
+        raw = f"{href} {title}"
+        m = re.search(r"\((19\d{2}|20\d{2})\)", raw)
+        if not m:
+            continue
+        hints.setdefault(name, m.group(1))
+    return hints
+
+
 def _fetch_namu_wiki_starters_for_game(
     target: date, away_team_id: str, home_team_id: str
 ) -> Dict[str, str]:
@@ -549,11 +588,16 @@ def _fetch_namu_wiki_starters_for_game(
     home_short = KBO_ID_TO_NAMU_TEAM_SHORT.get(str(home_team_id or "").strip(), "")
     away_starter = by_team.get(away_short, "")
     home_starter = by_team.get(home_short, "")
+    birth_hints = _parse_namu_starter_birthyear_hints_for_date(html, target)
+    away_birth_year = birth_hints.get(away_starter, "") if away_starter else ""
+    home_birth_year = birth_hints.get(home_starter, "") if home_starter else ""
     if not away_starter and not home_starter:
         return {}
     return {
         "away_starter": away_starter,
         "home_starter": home_starter,
+        "away_starter_birth_year": away_birth_year,
+        "home_starter_birth_year": home_birth_year,
     }
 
 
@@ -2527,7 +2571,23 @@ def _fetch_live_starter_names(game_id: str, season_id: str, sr_id: str) -> Dict[
     return {}
 
 
-def _resolve_pitcher_id_from_search(player_name: str, team_id: str) -> str:
+def _fetch_pitcher_birth_year(player_id: str) -> str:
+    pid = str(player_id or "").strip()
+    if not pid:
+        return ""
+    cached = _PITCHER_BIRTH_YEAR_CACHE.get(pid, "")
+    if cached:
+        return cached
+    stats = _fetch_pitcher_stats(pid)
+    birth_date = str(stats.get("birth_date") or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", birth_date):
+        year = birth_date[:4]
+        _PITCHER_BIRTH_YEAR_CACHE[pid] = year
+        return year
+    return ""
+
+
+def _resolve_pitcher_id_from_search(player_name: str, team_id: str, birth_year_hint: str = "") -> str:
     """
     Resolve playerId from KBO player search endpoint.
     Prefer active roster and team match.
@@ -2557,7 +2617,22 @@ def _resolve_pitcher_id_from_search(player_name: str, team_id: str) -> str:
         return ""
 
     filtered = [p for p in candidates if str(p.get("T_ID", "")) == str(team_id)]
-    target = filtered[0] if filtered else candidates[0]
+    target_pool = filtered if filtered else candidates
+
+    # 동명이인 대응: 나무위키 링크에 "(YYYY)" 힌트가 있으면 해당 출생연도로 우선 매칭한다.
+    if birth_year_hint and len(target_pool) > 1:
+        for cand in target_pool:
+            cand_pid = str(cand.get("P_ID", "")).strip()
+            if not cand_pid:
+                link = str(cand.get("P_LINK", "") or "")
+                m = re.search(r"playerId=(\d+)", link)
+                cand_pid = m.group(1) if m else ""
+            if not cand_pid:
+                continue
+            if _fetch_pitcher_birth_year(cand_pid) == birth_year_hint:
+                return cand_pid
+
+    target = target_pool[0]
     player_id = str(target.get("P_ID", "")).strip()
     if player_id:
         return player_id
@@ -3078,6 +3153,8 @@ def _resolve_game_starter_names(
             away_starter = _resolve_starter_name_with_player_id(away_starter, away_starter_id)
             home_starter = _resolve_starter_name_with_player_id(home_starter, home_starter_id)
 
+    away_birth_year_hint = ""
+    home_birth_year_hint = ""
     if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
         namu_starters = _fetch_namu_wiki_starters_for_game(
             target,
@@ -3086,8 +3163,19 @@ def _resolve_game_starter_names(
         )
         if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
             away_starter = namu_starters["away_starter"]
+            away_birth_year_hint = str(namu_starters.get("away_starter_birth_year") or "").strip()
         if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
             home_starter = namu_starters["home_starter"]
+            home_birth_year_hint = str(namu_starters.get("home_starter_birth_year") or "").strip()
+
+    if not away_starter_id and not _is_missing_starter_name(away_starter):
+        away_starter_id = _resolve_pitcher_id_from_search(
+            away_starter, str(game.get("AWAY_ID", "")), away_birth_year_hint
+        )
+    if not home_starter_id and not _is_missing_starter_name(home_starter):
+        home_starter_id = _resolve_pitcher_id_from_search(
+            home_starter, str(game.get("HOME_ID", "")), home_birth_year_hint
+        )
 
     away_starter = away_starter.strip() if away_starter else ""
     home_starter = home_starter.strip() if home_starter else ""
