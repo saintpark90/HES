@@ -1319,6 +1319,52 @@ const renderLeagueResultsSection = (g) => {
   `;
 };
 
+const renderLeagueProbableSection = (g) => {
+  const raw = Array.isArray(g?.league_probable_games) ? g.league_probable_games : [];
+  if (raw.length === 0) return "";
+  const ymd = g.league_probable_date || g.game_date_ymd || "";
+  const dt = parseYmdAsLocalDate(ymd);
+  const titleDate = dt
+    ? `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`
+    : ymd;
+  const sid = String(g?.season_id || "").trim();
+  const cards = raw
+    .map((row) => {
+      const awayEm = getOpponentEmblemUrl(sid, row.away_team_id);
+      const homeEm = getOpponentEmblemUrl(sid, row.home_team_id);
+      const starterText = `${row.away_starter || "미정"} : ${row.home_starter || "미정"}`;
+      return `
+      <article class="yesterday-league-card">
+        <div class="yesterday-league-card-top">
+          <div class="yesterday-league-side yesterday-league-side--away">
+            ${awayEm ? `<img src="${escapeHtml(awayEm)}" alt="${escapeHtml(row.away_team)} 엠블럼" class="yesterday-league-emblem" loading="lazy" />` : ""}
+            <span class="yesterday-league-team-name">${escapeHtml(row.away_team)}</span>
+          </div>
+          <div class="yesterday-league-center">
+            <div class="yesterday-league-score">${escapeHtml(starterText)}</div>
+            <strong class="yesterday-league-result">선발</strong>
+          </div>
+          <div class="yesterday-league-side yesterday-league-side--home">
+            ${homeEm ? `<img src="${escapeHtml(homeEm)}" alt="${escapeHtml(row.home_team)} 엠블럼" class="yesterday-league-emblem" loading="lazy" />` : ""}
+            <span class="yesterday-league-team-name">${escapeHtml(row.home_team)}</span>
+          </div>
+        </div>
+        <div class="yesterday-league-foot">
+          <span>${escapeHtml(row.stadium || "")}</span>
+          ${row.game_time ? `<span class="yesterday-league-time">${escapeHtml(row.game_time)}</span>` : ""}
+        </div>
+      </article>
+    `;
+    })
+    .join("");
+  return `
+    <section class="yesterday-league-section">
+      <h2 class="cmp-title">예정 경기 선발 <span class="yesterday-league-date">${titleDate}</span></h2>
+      <div class="yesterday-league-grid">${cards}</div>
+    </section>
+  `;
+};
+
 const renderGame = (g, refreshedAt) => {
   if (!g) {
     container.innerHTML = "<p>가까운 일정에서 한화 이글스 경기 정보를 찾지 못했습니다.</p>";
@@ -1357,6 +1403,7 @@ const renderGame = (g, refreshedAt) => {
     </div>
     ${renderWeatherSection(g)}
     ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary, g)}
+    ${renderLeagueProbableSection(g)}
     ${renderLeagueResultsSection(g)}
     ${renderLineupSection(g)}
     ${renderRegisterMoveSection(g)}

@@ -3207,6 +3207,49 @@ def _find_hanwha_game_with_published_starters_on_date(target: date) -> Optional[
     return None
 
 
+def _build_same_day_probable_games(target: date, hanwha_game_id: str) -> list[Dict[str, Any]]:
+    """Build non-Hanwha same-day game cards with probable starters."""
+    try:
+        games = _fetch_games(target)
+    except Exception:
+        return []
+
+    rows: list[Dict[str, Any]] = []
+    for game in games:
+        game_id = str(game.get("G_ID", "") or "")
+        if not game_id or game_id == hanwha_game_id:
+            continue
+        if _is_hanwha_game(game):
+            continue
+        if _is_cancelled_game(game):
+            continue
+
+        away_starter, home_starter, away_starter_id, home_starter_id = _resolve_game_starter_names(game, target)
+        away_starter = away_starter if not _is_missing_starter_name(away_starter) else "미정"
+        home_starter = home_starter if not _is_missing_starter_name(home_starter) else "미정"
+
+        rows.append(
+            {
+                "date": target.strftime("%Y-%m-%d"),
+                "game_id": game_id,
+                "season_id": str(game.get("SEASON_ID", "") or ""),
+                "game_time": str(game.get("G_TM", "") or ""),
+                "stadium": str(game.get("S_NM", "") or ""),
+                "away_team": str(game.get("AWAY_NM", "") or ""),
+                "home_team": str(game.get("HOME_NM", "") or ""),
+                "away_team_id": str(game.get("AWAY_ID", "") or ""),
+                "home_team_id": str(game.get("HOME_ID", "") or ""),
+                "away_starter": away_starter,
+                "home_starter": home_starter,
+                "away_starter_id": away_starter_id,
+                "home_starter_id": home_starter_id,
+            }
+        )
+
+    rows.sort(key=lambda x: str(x.get("game_time", "")))
+    return rows
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
@@ -3307,6 +3350,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 stadium_name=str(game.get("S_NM", "") or ""),
             )
             season_schedule = _get_hanwha_season_schedule_cached(season_id)
+            league_probable_games = _build_same_day_probable_games(target, game_id)
 
             return {
                 "season_id": season_id,
@@ -3348,6 +3392,8 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,
                 "season_schedule": season_schedule,
+                "league_probable_date": target.strftime("%Y-%m-%d"),
+                "league_probable_games": league_probable_games,
                 "league_results_date": league_results_ymd,
                 "league_results_games": league_results_games,
             }
