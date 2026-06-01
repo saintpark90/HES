@@ -1186,6 +1186,18 @@ const parseMonthKey = (monthKey) => {
 };
 
 const KBO_EMBLEM_BASE_URL = "https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/emblem/regular";
+const KBO_TEAM_ID_BY_NAME = {
+  한화: "HH",
+  두산: "OB",
+  삼성: "SS",
+  롯데: "LT",
+  SSG: "SK",
+  키움: "WO",
+  LG: "LG",
+  KT: "KT",
+  KIA: "HT",
+  NC: "NC",
+};
 const TICKET_URL_BY_TEAM_ID = {
   HH: "https://www.ticketlink.co.kr/sports/137/63",
   LG: "https://www.ticketlink.co.kr/sports/137/59",
@@ -1321,27 +1333,46 @@ const renderLeagueResultsSection = (g) => {
 
 const renderLeagueProbableSection = (g) => {
   const raw = Array.isArray(g?.league_probable_games) ? g.league_probable_games : [];
-  if (raw.length === 0) return "";
+  const hanwhaRow = {
+    game_time: g?.game_time || "",
+    stadium: g?.stadium || "",
+    away_team: g?.away_team || "",
+    home_team: g?.home_team || "",
+    away_team_id: KBO_TEAM_ID_BY_NAME[g?.away_team] || "",
+    home_team_id: KBO_TEAM_ID_BY_NAME[g?.home_team] || "",
+    away_starter: g?.away_starter || "미정",
+    home_starter: g?.home_starter || "미정",
+  };
+  const games = [hanwhaRow, ...raw];
+  const deduped = [];
+  const seen = new Set();
+  for (const row of games) {
+    const key = `${row.away_team || ""}|${row.home_team || ""}|${row.game_time || ""}|${row.stadium || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+  }
+  if (deduped.length === 0) return "";
   const ymd = g.league_probable_date || g.game_date_ymd || "";
   const dt = parseYmdAsLocalDate(ymd);
   const titleDate = dt
     ? `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`
     : ymd;
   const sid = String(g?.season_id || "").trim();
-  const cards = raw
+  const cards = deduped
     .map((row) => {
       const awayEm = getOpponentEmblemUrl(sid, row.away_team_id);
       const homeEm = getOpponentEmblemUrl(sid, row.home_team_id);
       const starterText = `${row.away_starter || "미정"} : ${row.home_starter || "미정"}`;
       return `
-      <article class="yesterday-league-card">
+      <article class="yesterday-league-card yesterday-league-card--probable">
         <div class="yesterday-league-card-top">
           <div class="yesterday-league-side yesterday-league-side--away">
             ${awayEm ? `<img src="${escapeHtml(awayEm)}" alt="${escapeHtml(row.away_team)} 엠블럼" class="yesterday-league-emblem" loading="lazy" />` : ""}
             <span class="yesterday-league-team-name">${escapeHtml(row.away_team)}</span>
           </div>
           <div class="yesterday-league-center">
-            <div class="yesterday-league-score">${escapeHtml(starterText)}</div>
+            <div class="yesterday-league-score yesterday-league-score--probable">${escapeHtml(starterText)}</div>
             <strong class="yesterday-league-result">선발</strong>
           </div>
           <div class="yesterday-league-side yesterday-league-side--home">

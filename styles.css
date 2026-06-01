@@ -817,6 +817,11 @@ body.sun-shade-open {
   box-sizing: border-box;
 }
 
+.yesterday-league-card--probable {
+  width: 210px;
+  min-width: 210px;
+}
+
 .yesterday-league-card--clickable {
   cursor: pointer;
 }
@@ -878,6 +883,13 @@ body.sun-shade-open {
   font-weight: 800;
   color: var(--hes-text);
   letter-spacing: 0.02em;
+}
+
+.yesterday-league-score--probable {
+  font-size: 12px;
+  line-height: 1.35;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .yesterday-league-result {
