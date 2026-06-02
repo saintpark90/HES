@@ -444,12 +444,12 @@ def _namu_wiki_month_page_url(target: date) -> str:
     return f"{NAMU_WIKI_BASE_URL}{quote(path)}"
 
 
-def _fetch_namu_wiki_month_html(target: date) -> str:
+def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) -> str:
     cache_key = f"{target.year}-{target.month:02d}"
     now_ts = time.time()
     cached = _NAMU_WIKI_MONTH_CACHE.get(cache_key) or {}
     cached_at = float(cached.get("cached_at", 0.0) or 0.0)
-    if cached and (now_ts - cached_at) <= _NAMU_WIKI_MONTH_CACHE_TTL_SEC:
+    if (not force_refresh) and cached and (now_ts - cached_at) <= _NAMU_WIKI_MONTH_CACHE_TTL_SEC:
         html = cached.get("html")
         if isinstance(html, str) and html:
             return html
@@ -577,9 +577,9 @@ def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dic
 
 
 def _fetch_namu_wiki_starters_for_game(
-    target: date, away_team_id: str, home_team_id: str
+    target: date, away_team_id: str, home_team_id: str, *, force_refresh: bool = False
 ) -> Dict[str, str]:
-    html = _fetch_namu_wiki_month_html(target)
+    html = _fetch_namu_wiki_month_html(target, force_refresh=force_refresh)
     by_team = _parse_namu_starters_for_date(html, target)
     if not by_team:
         return {}
@@ -3176,6 +3176,20 @@ def _resolve_game_starter_names(
         home_starter_id = _resolve_pitcher_id_from_search(
             home_starter, str(game.get("HOME_ID", "")), home_birth_year_hint
         )
+
+    # Right before falling back to "미정", do one more forced Namu check (cache bypass)
+    # to reduce stale-cache misses around lineup update timing.
+    if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
+        namu_retry = _fetch_namu_wiki_starters_for_game(
+            target,
+            str(game.get("AWAY_ID", "")),
+            str(game.get("HOME_ID", "")),
+            force_refresh=True,
+        )
+        if _is_missing_starter_name(away_starter) and namu_retry.get("away_starter"):
+            away_starter = namu_retry["away_starter"]
+        if _is_missing_starter_name(home_starter) and namu_retry.get("home_starter"):
+            home_starter = namu_retry["home_starter"]
 
     away_starter = away_starter.strip() if away_starter else ""
     home_starter = home_starter.strip() if home_starter else ""
