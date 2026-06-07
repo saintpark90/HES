@@ -444,6 +444,19 @@ def _namu_wiki_month_page_url(target: date) -> str:
     return f"{NAMU_WIKI_BASE_URL}{quote(path)}"
 
 
+_NAMU_WIKI_SSR_USER_AGENT = (
+    "facebookexternalhit/1.1 (+ http://www.facebook.com/externalhit_uatext.php)"
+)
+
+
+def _is_valid_namu_month_html(html: str) -> bool:
+    """Reject Namu SPA shells that contain no article markup."""
+    if not isinstance(html, str) or len(html) < 50000:
+        return False
+    lowered = html.lower()
+    return "theseed" in lowered or "app-loading" not in lowered
+
+
 def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) -> str:
     cache_key = f"{target.year}-{target.month:02d}"
     now_ts = time.time()
@@ -451,26 +464,42 @@ def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) ->
     cached_at = float(cached.get("cached_at", 0.0) or 0.0)
     if (not force_refresh) and cached and (now_ts - cached_at) <= _NAMU_WIKI_MONTH_CACHE_TTL_SEC:
         html = cached.get("html")
-        if isinstance(html, str) and html:
+        if isinstance(html, str) and _is_valid_namu_month_html(html):
             return html
 
-    headers = {
-        "User-Agent": (
+    url = _namu_wiki_month_page_url(target)
+    user_agents = [
+        _NAMU_WIKI_SSR_USER_AGENT,
+        (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ),
-        "Accept-Language": "ko-KR,ko;q=0.9",
-    }
-    try:
-        response = _http_get_with_retries(
-            _namu_wiki_month_page_url(target),
-            headers=headers,
-            timeout=20,
-        )
-        response.raise_for_status()
-        response.encoding = "utf-8"
-        html = response.text or ""
-    except Exception:
+    ]
+    html = ""
+    for user_agent in user_agents:
+        headers = {
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": "https://namu.wiki/",
+        }
+        try:
+            response = _http_get_with_retries(
+                url,
+                headers=headers,
+                timeout=30,
+                retries=3,
+            )
+            response.raise_for_status()
+            response.encoding = "utf-8"
+            candidate = response.text or ""
+        except Exception:
+            candidate = ""
+        if _is_valid_namu_month_html(candidate):
+            html = candidate
+            break
+
+    if not _is_valid_namu_month_html(html):
         return ""
 
     _NAMU_WIKI_MONTH_CACHE[cache_key] = {"cached_at": now_ts, "html": html}
@@ -492,12 +521,10 @@ def _is_valid_namu_starter_name(name: str) -> bool:
     return True
 
 
-def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
-    """
-    Parse {team_short: pitcher_name} from the per-game section on the monthly wiki page.
-    """
+def _extract_namu_lineup_chunk(html: str, target: date) -> str:
+    """Locate the per-game lineup section on the Hanwha monthly wiki page."""
     if not html:
-        return {}
+        return ""
 
     month, day = target.month, target.day
     markers = [
@@ -512,18 +539,50 @@ def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
     if idx < 0:
         day_pat = re.compile(rf"{month}\s*월\s*{day}\s*일")
         for match in day_pat.finditer(html):
-            chunk = html[match.start() : match.start() + 120]
+            chunk = html[match.start() : match.start() + 500]
             if "선발" in chunk or "라인업" in chunk:
                 idx = match.start()
                 break
     if idx < 0:
+        return ""
+    return html[idx : idx + 25000]
+
+
+def _parse_namu_starter_name_from_cell(cell) -> str:
+    if cell is None:
+        return ""
+    link = cell.find("a")
+    candidate = (link.get_text() if link else cell.get_text(" ", strip=True)).strip()
+    return candidate if _is_valid_namu_starter_name(candidate) else ""
+
+
+def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
+    """
+    Parse {team_short: pitcher_name} from the per-game section on the monthly wiki page.
+    Prefer lineup table rows (팀 | 선발) over plain-text token scanning.
+    """
+    chunk = _extract_namu_lineup_chunk(html, target)
+    if not chunk:
         return {}
 
-    chunk = html[idx : idx + 25000]
+    soup = BeautifulSoup(chunk, "html.parser")
+    starters: Dict[str, str] = {}
+    for row in soup.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 2:
+            continue
+        team = cells[0].get_text(" ", strip=True)
+        if team not in _NAMU_TEAM_SHORTS:
+            continue
+        candidate = _parse_namu_starter_name_from_cell(cells[1])
+        if candidate:
+            starters[team] = candidate
+
+    if len(starters) >= 2:
+        return starters
+
     plain = re.sub(r"<[^>]+>", "|", chunk)
     parts = [part.strip() for part in plain.split("|") if part.strip()]
-
-    starters: Dict[str, str] = {}
     for idx_part, part in enumerate(parts):
         if part not in _NAMU_TEAM_SHORTS:
             continue
@@ -543,25 +602,32 @@ def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dic
     Parse {starter_name: birth_year_hint} from namu anchors in the per-game chunk.
     Example href/title: /w/박준영(2002)
     """
-    if not html:
+    chunk = _extract_namu_lineup_chunk(html, target)
+    if not chunk:
         return {}
 
-    month, day = target.month, target.day
-    markers = [
-        f"한화 이글스 {month}월 {day}일 선발",
-        f"{month}월 {day}일 선발 라인업",
-    ]
-    idx = -1
-    for marker in markers:
-        idx = html.find(marker)
-        if idx >= 0:
-            break
-    if idx < 0:
-        return {}
-
-    chunk = html[idx : idx + 25000]
     soup = BeautifulSoup(chunk, "html.parser")
     hints: Dict[str, str] = {}
+    for row in soup.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 2:
+            continue
+        team = cells[0].get_text(" ", strip=True)
+        if team not in _NAMU_TEAM_SHORTS:
+            continue
+        link = cells[1].find("a")
+        if not link:
+            continue
+        name = (link.get_text() or "").strip()
+        if not _is_valid_namu_starter_name(name):
+            continue
+        href = str(link.get("href") or "")
+        title = str(link.get("title") or "")
+        raw = f"{href} {title}"
+        m = re.search(r"\((19\d{2}|20\d{2})\)", raw)
+        if m:
+            hints.setdefault(name, m.group(1))
+
     for a in soup.find_all("a"):
         name = (a.get_text() or "").strip()
         if not _is_valid_namu_starter_name(name):
@@ -3188,8 +3254,19 @@ def _resolve_game_starter_names(
         )
         if _is_missing_starter_name(away_starter) and namu_retry.get("away_starter"):
             away_starter = namu_retry["away_starter"]
+            away_birth_year_hint = str(namu_retry.get("away_starter_birth_year") or "").strip() or away_birth_year_hint
         if _is_missing_starter_name(home_starter) and namu_retry.get("home_starter"):
             home_starter = namu_retry["home_starter"]
+            home_birth_year_hint = str(namu_retry.get("home_starter_birth_year") or "").strip() or home_birth_year_hint
+
+    if not away_starter_id and not _is_missing_starter_name(away_starter):
+        away_starter_id = _resolve_pitcher_id_from_search(
+            away_starter, str(game.get("AWAY_ID", "")), away_birth_year_hint
+        )
+    if not home_starter_id and not _is_missing_starter_name(home_starter):
+        home_starter_id = _resolve_pitcher_id_from_search(
+            home_starter, str(game.get("HOME_ID", "")), home_birth_year_hint
+        )
 
     away_starter = away_starter.strip() if away_starter else ""
     home_starter = home_starter.strip() if home_starter else ""
@@ -3301,11 +3378,31 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 game, target
             )
 
+            away_birth_hint = ""
+            home_birth_hint = ""
+            if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
+                namu_starters = _fetch_namu_wiki_starters_for_game(
+                    target,
+                    str(game.get("AWAY_ID", "")),
+                    str(game.get("HOME_ID", "")),
+                    force_refresh=True,
+                )
+                if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
+                    away_starter = namu_starters["away_starter"]
+                    away_birth_hint = str(namu_starters.get("away_starter_birth_year") or "").strip()
+                if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
+                    home_starter = namu_starters["home_starter"]
+                    home_birth_hint = str(namu_starters.get("home_starter_birth_year") or "").strip()
+
             # Final fallback: resolve starter IDs by name via player search endpoint.
-            if not away_starter_id:
-                away_starter_id = _resolve_pitcher_id_from_search(away_starter, str(game.get("AWAY_ID", "")))
-            if not home_starter_id:
-                home_starter_id = _resolve_pitcher_id_from_search(home_starter, str(game.get("HOME_ID", "")))
+            if not away_starter_id and not _is_missing_starter_name(away_starter):
+                away_starter_id = _resolve_pitcher_id_from_search(
+                    away_starter, str(game.get("AWAY_ID", "")), away_birth_hint
+                )
+            if not home_starter_id and not _is_missing_starter_name(home_starter):
+                home_starter_id = _resolve_pitcher_id_from_search(
+                    home_starter, str(game.get("HOME_ID", "")), home_birth_hint
+                )
 
             away_starter_stats = _fetch_pitcher_stats(away_starter_id)
             home_starter_stats = _fetch_pitcher_stats(home_starter_id)
