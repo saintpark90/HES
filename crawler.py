@@ -447,41 +447,30 @@ def _namu_wiki_month_page_url(target: date) -> str:
 _NAMU_WIKI_SSR_USER_AGENT = (
     "facebookexternalhit/1.1 (+ http://www.facebook.com/externalhit_uatext.php)"
 )
+_NAMU_WIKI_SSR_USER_AGENTS = [
+    _NAMU_WIKI_SSR_USER_AGENT,
+    "Twitterbot/1.0",
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+]
+_NAMU_WIKI_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 
 
 def _is_valid_namu_month_html(html: str) -> bool:
     """Reject Namu SPA shells that contain no article markup."""
     if not isinstance(html, str) or len(html) < 50000:
         return False
-    lowered = html.lower()
-    return "theseed" in lowered or "app-loading" not in lowered
+    return "한화 이글스" in html and "월" in html
 
 
-def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) -> str:
-    cache_key = f"{target.year}-{target.month:02d}"
-    now_ts = time.time()
-    cached = _NAMU_WIKI_MONTH_CACHE.get(cache_key) or {}
-    cached_at = float(cached.get("cached_at", 0.0) or 0.0)
-    if (not force_refresh) and cached and (now_ts - cached_at) <= _NAMU_WIKI_MONTH_CACHE_TTL_SEC:
-        html = cached.get("html")
-        if isinstance(html, str) and _is_valid_namu_month_html(html):
-            return html
-
-    url = _namu_wiki_month_page_url(target)
-    user_agents = [
-        _NAMU_WIKI_SSR_USER_AGENT,
-        (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-    ]
-    html = ""
-    for user_agent in user_agents:
+def _fetch_namu_wiki_month_html_via_ssr(url: str) -> str:
+    for user_agent in _NAMU_WIKI_SSR_USER_AGENTS:
         headers = {
             "User-Agent": user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Referer": "https://namu.wiki/",
         }
         try:
             response = _http_get_with_retries(
@@ -496,8 +485,46 @@ def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) ->
         except Exception:
             candidate = ""
         if _is_valid_namu_month_html(candidate):
-            html = candidate
-            break
+            return candidate
+    return ""
+
+
+def _fetch_namu_wiki_month_html_via_session(url: str) -> str:
+    """Namu often returns an empty SPA shell unless cookies are primed first."""
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": _NAMU_WIKI_BROWSER_USER_AGENT,
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+    )
+    try:
+        session.get(NAMU_WIKI_BASE_URL, timeout=20)
+        response = session.get(url, timeout=30)
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        candidate = response.text or ""
+    except Exception:
+        return ""
+    return candidate if _is_valid_namu_month_html(candidate) else ""
+
+
+def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) -> str:
+    cache_key = f"{target.year}-{target.month:02d}"
+    now_ts = time.time()
+    if force_refresh:
+        _NAMU_WIKI_MONTH_CACHE.pop(cache_key, None)
+    cached = _NAMU_WIKI_MONTH_CACHE.get(cache_key) or {}
+    cached_at = float(cached.get("cached_at", 0.0) or 0.0)
+    if (not force_refresh) and cached and (now_ts - cached_at) <= _NAMU_WIKI_MONTH_CACHE_TTL_SEC:
+        html = cached.get("html")
+        if isinstance(html, str) and _is_valid_namu_month_html(html):
+            return html
+
+    url = _namu_wiki_month_page_url(target)
+    html = _fetch_namu_wiki_month_html_via_ssr(url)
+    if not html:
+        html = _fetch_namu_wiki_month_html_via_session(url)
 
     if not _is_valid_namu_month_html(html):
         return ""
@@ -665,6 +692,60 @@ def _fetch_namu_wiki_starters_for_game(
         "away_starter_birth_year": away_birth_year,
         "home_starter_birth_year": home_birth_year,
     }
+
+
+def ensure_game_starters_from_namu(game_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Last-chance Namu refill before writing static output when starters are still TBD."""
+    if not isinstance(game_info, dict) or not game_info:
+        return game_info
+
+    away_starter = str(game_info.get("away_starter") or "").strip()
+    home_starter = str(game_info.get("home_starter") or "").strip()
+    if not _is_missing_starter_name(away_starter) and not _is_missing_starter_name(home_starter):
+        return game_info
+
+    game_id = str(game_info.get("game_id") or "").strip()
+    game_date_ymd = str(game_info.get("game_date_ymd") or "").strip()
+    if not game_id or not game_date_ymd:
+        return game_info
+
+    game = _fetch_game_by_game_id(game_id)
+    if not game:
+        return game_info
+
+    try:
+        target = date.fromisoformat(game_date_ymd)
+    except Exception:
+        return game_info
+
+    _NAMU_WIKI_MONTH_CACHE.pop(f"{target.year}-{target.month:02d}", None)
+    away_starter, home_starter, away_starter_id, home_starter_id = _resolve_game_starter_names(
+        game, target
+    )
+
+    updated = dict(game_info)
+    updated["away_starter"] = away_starter
+    updated["home_starter"] = home_starter
+    updated["away_starter_id"] = away_starter_id
+    updated["home_starter_id"] = home_starter_id
+
+    is_away = str(game.get("AWAY_ID", "")) == HANWHA_TEAM_ID
+    hanwha_starter = away_starter if is_away else home_starter
+    if _is_missing_starter_name(hanwha_starter):
+        hanwha_starter = _extract_hanwha_starter(game) or "미정"
+    updated["hanwha_starter"] = hanwha_starter
+
+    season_id = str(game_info.get("season_id") or game.get("SEASON_ID") or "")
+    for side, pitcher_id in (("away", away_starter_id), ("home", home_starter_id)):
+        if not pitcher_id:
+            continue
+        stats = _fetch_pitcher_stats(pitcher_id) or {}
+        updated[f"{side}_starter_stats"] = stats or updated.get(f"{side}_starter_stats") or {"war": "-"}
+        image_url = stats.get("image_url") or _face_image_url(season_id, pitcher_id)
+        if image_url:
+            updated[f"{side}_starter_image"] = image_url
+
+    return updated
 
 
 def _face_image_url(season_id: str, player_id: str) -> str:

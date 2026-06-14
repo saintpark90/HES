@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from crawler import get_next_hanwha_game
+from crawler import ensure_game_starters_from_namu, get_next_hanwha_game
 from generate_holiday_data import build as build_holiday_data
 
 ROOT = Path(__file__).parent
@@ -233,6 +233,7 @@ def build() -> None:
     register_moves_cache = _load_register_moves_cache()
     game_info = get_next_hanwha_game() or {}
     if game_info:
+        game_info = ensure_game_starters_from_namu(game_info)
         game_info = _merge_media_fallbacks(game_info, previous_game_info)
         game_info = _merge_starter_fallbacks(game_info, previous_game_info)
         game_info = _merge_register_moves_fallbacks(game_info, previous_game_info)
