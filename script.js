@@ -498,8 +498,10 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead, g) => {
 
     const { away, home } = tc;
     const hanwhaLast5 = buildHanwhaRecent5FromSchedule(g);
-    const awayLast5 = awayName === "한화" && hanwhaLast5 ? hanwhaLast5 : away.last5;
-    const homeLast5 = homeName === "한화" && hanwhaLast5 ? hanwhaLast5 : home.last5;
+    const awayUsesHanwhaSchedule = awayName === "한화" && Boolean(hanwhaLast5);
+    const homeUsesHanwhaSchedule = homeName === "한화" && Boolean(hanwhaLast5);
+    const awayLast5 = awayUsesHanwhaSchedule ? hanwhaLast5 : away.last5;
+    const homeLast5 = homeUsesHanwhaSchedule ? hanwhaLast5 : home.last5;
 
     const statRow = (label, awayVal, homeVal, awayWin, homeWin) => `
       <tr>
@@ -510,28 +512,28 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead, g) => {
     `;
 
     const last5Row = (awayLast5, homeLast5) => {
-      // KBO `last5` is newest→oldest. Reverse so the rightmost dot is the most recent game.
-      const dots = (seq) => {
+      const dots = (seq, latestSide) => {
         const out = [];
         for (const c of String(seq || "")) {
           if (c === "승" || c === "패" || c === "무") out.push(c);
         }
         if (out.length === 0) return "—";
         const ordered = [...out].reverse();
-        const lastI = ordered.length - 1;
+        // KBO comparison data and Hanwha schedule data land in opposite recency order.
+        const latestI = latestSide === "left" ? 0 : ordered.length - 1;
         return ordered
           .map((c, i) => {
             const kind = c === "승" ? "win" : c === "패" ? "loss" : "draw";
-            const latest = i === lastI ? " last5-latest" : "";
+            const latest = i === latestI ? " last5-latest" : "";
             return `<span class="dot ${kind}${latest}">${c}</span>`;
           })
           .join("");
       };
       return `
         <tr>
-          <td class="cmp-val">${dots(awayLast5)}</td>
+          <td class="cmp-val">${dots(awayLast5, awayUsesHanwhaSchedule ? "right" : "left")}</td>
           <td class="cmp-label">최근 5경기</td>
-          <td class="cmp-val">${dots(homeLast5)}</td>
+          <td class="cmp-val">${dots(homeLast5, homeUsesHanwhaSchedule ? "right" : "left")}</td>
         </tr>
       `;
     };
