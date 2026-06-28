@@ -498,15 +498,20 @@ def _fetch_namu_wiki_month_html_via_session(url: str) -> str:
             "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
         }
     )
-    try:
-        session.get(NAMU_WIKI_BASE_URL, timeout=20)
-        response = session.get(url, timeout=30)
-        response.raise_for_status()
-        response.encoding = "utf-8"
-        candidate = response.text or ""
-    except Exception:
-        return ""
-    return candidate if _is_valid_namu_month_html(candidate) else ""
+    for attempt in range(2):
+        try:
+            session.get(NAMU_WIKI_BASE_URL, timeout=20)
+            response = session.get(url, timeout=30)
+            response.raise_for_status()
+            response.encoding = "utf-8"
+            candidate = response.text or ""
+        except Exception:
+            candidate = ""
+        if _is_valid_namu_month_html(candidate):
+            return candidate
+        if attempt == 0:
+            time.sleep(0.8)
+    return ""
 
 
 def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) -> str:
@@ -522,15 +527,43 @@ def _fetch_namu_wiki_month_html(target: date, *, force_refresh: bool = False) ->
             return html
 
     url = _namu_wiki_month_page_url(target)
-    html = _fetch_namu_wiki_month_html_via_ssr(url)
-    if not html:
-        html = _fetch_namu_wiki_month_html_via_session(url)
+    html = ""
+    for attempt in range(2):
+        html = _fetch_namu_wiki_month_html_via_ssr(url)
+        if not html:
+            html = _fetch_namu_wiki_month_html_via_session(url)
+        if _is_valid_namu_month_html(html):
+            break
+        html = ""
+        if attempt == 0:
+            time.sleep(1.0)
 
     if not _is_valid_namu_month_html(html):
         return ""
 
     _NAMU_WIKI_MONTH_CACHE[cache_key] = {"cached_at": now_ts, "html": html}
     return html
+
+
+def _parse_namu_birth_hint(raw: str) -> tuple[str, str]:
+    """Return (birth_year, birth_date_iso) parsed from Namu anchor href/title."""
+    text = str(raw or "")
+    m_full = re.search(r"\((\d{4}-\d{2}-\d{2})\)", text)
+    if m_full:
+        birth_date = m_full.group(1)
+        return birth_date[:4], birth_date
+    m_year = re.search(r"\((19\d{2}|20\d{2})\)", text)
+    if m_year:
+        return m_year.group(1), ""
+    return "", ""
+
+
+def _namu_birth_hint_from_anchor(link) -> tuple[str, str]:
+    if link is None:
+        return "", ""
+    href = str(link.get("href") or "")
+    title = str(link.get("title") or "")
+    return _parse_namu_birth_hint(f"{href} {title}")
 
 
 def _is_valid_namu_starter_name(name: str) -> bool:
@@ -558,21 +591,30 @@ def _extract_namu_lineup_chunk(html: str, target: date) -> str:
         f"한화 이글스 {month}월 {day}일 선발",
         f"{month}월 {day}일 선발 라인업",
     ]
-    idx = -1
+    best_idx = -1
+    best_score = -1
     for marker in markers:
-        idx = html.find(marker)
-        if idx >= 0:
-            break
-    if idx < 0:
+        start = 0
+        score = 3 if "선발" in marker and "라인업" in marker else 2
+        while True:
+            idx = html.find(marker, start)
+            if idx < 0:
+                break
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+            start = idx + len(marker)
+
+    if best_idx < 0:
         day_pat = re.compile(rf"{month}\s*월\s*{day}\s*일")
         for match in day_pat.finditer(html):
-            chunk = html[match.start() : match.start() + 500]
-            if "선발" in chunk or "라인업" in chunk:
-                idx = match.start()
+            snippet = html[match.start() : match.start() + 500]
+            if "선발" in snippet or "라인업" in snippet:
+                best_idx = match.start()
                 break
-    if idx < 0:
+    if best_idx < 0:
         return ""
-    return html[idx : idx + 25000]
+    return html[best_idx : best_idx + 25000]
 
 
 def _parse_namu_starter_name_from_cell(cell) -> str:
@@ -599,11 +641,15 @@ def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
         if len(cells) < 2:
             continue
         team = cells[0].get_text(" ", strip=True)
+        candidate = _parse_namu_starter_name_from_cell(cells[1])
+        if not candidate:
+            continue
+        if team == "선발 투수":
+            starters.setdefault("한화", candidate)
+            continue
         if team not in _NAMU_TEAM_SHORTS:
             continue
-        candidate = _parse_namu_starter_name_from_cell(cells[1])
-        if candidate:
-            starters[team] = candidate
+        starters[team] = candidate
 
     if len(starters) >= 2:
         return starters
@@ -624,23 +670,23 @@ def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
     return starters
 
 
-def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dict[str, str]:
+def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dict[str, Dict[str, str]]:
     """
-    Parse {starter_name: birth_year_hint} from namu anchors in the per-game chunk.
-    Example href/title: /w/박준영(2002)
+    Parse {starter_name: {birth_year, birth_date}} from namu anchors in the per-game chunk.
+    Example href/title: /w/박준영(2002) or /w/박준영(2003-03-02)
     """
     chunk = _extract_namu_lineup_chunk(html, target)
     if not chunk:
         return {}
 
     soup = BeautifulSoup(chunk, "html.parser")
-    hints: Dict[str, str] = {}
+    hints: Dict[str, Dict[str, str]] = {}
     for row in soup.find_all("tr"):
         cells = row.find_all("td")
         if len(cells) < 2:
             continue
         team = cells[0].get_text(" ", strip=True)
-        if team not in _NAMU_TEAM_SHORTS:
+        if team not in _NAMU_TEAM_SHORTS and team != "선발 투수":
             continue
         link = cells[1].find("a")
         if not link:
@@ -648,24 +694,18 @@ def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dic
         name = (link.get_text() or "").strip()
         if not _is_valid_namu_starter_name(name):
             continue
-        href = str(link.get("href") or "")
-        title = str(link.get("title") or "")
-        raw = f"{href} {title}"
-        m = re.search(r"\((19\d{2}|20\d{2})\)", raw)
-        if m:
-            hints.setdefault(name, m.group(1))
+        birth_year, birth_date = _namu_birth_hint_from_anchor(link)
+        if birth_year or birth_date:
+            hints.setdefault(name, {"birth_year": birth_year, "birth_date": birth_date})
 
     for a in soup.find_all("a"):
         name = (a.get_text() or "").strip()
         if not _is_valid_namu_starter_name(name):
             continue
-        href = str(a.get("href") or "")
-        title = str(a.get("title") or "")
-        raw = f"{href} {title}"
-        m = re.search(r"\((19\d{2}|20\d{2})\)", raw)
-        if not m:
+        birth_year, birth_date = _namu_birth_hint_from_anchor(a)
+        if not birth_year and not birth_date:
             continue
-        hints.setdefault(name, m.group(1))
+        hints.setdefault(name, {"birth_year": birth_year, "birth_date": birth_date})
     return hints
 
 
@@ -682,8 +722,12 @@ def _fetch_namu_wiki_starters_for_game(
     away_starter = by_team.get(away_short, "")
     home_starter = by_team.get(home_short, "")
     birth_hints = _parse_namu_starter_birthyear_hints_for_date(html, target)
-    away_birth_year = birth_hints.get(away_starter, "") if away_starter else ""
-    home_birth_year = birth_hints.get(home_starter, "") if home_starter else ""
+    away_hint = birth_hints.get(away_starter, {}) if away_starter else {}
+    home_hint = birth_hints.get(home_starter, {}) if home_starter else {}
+    away_birth_year = str(away_hint.get("birth_year") or "").strip()
+    home_birth_year = str(home_hint.get("birth_year") or "").strip()
+    away_birth_date = str(away_hint.get("birth_date") or "").strip()
+    home_birth_date = str(home_hint.get("birth_date") or "").strip()
     if not away_starter and not home_starter:
         return {}
     return {
@@ -691,7 +735,25 @@ def _fetch_namu_wiki_starters_for_game(
         "home_starter": home_starter,
         "away_starter_birth_year": away_birth_year,
         "home_starter_birth_year": home_birth_year,
+        "away_starter_birth_date": away_birth_date,
+        "home_starter_birth_date": home_birth_date,
     }
+
+
+def _apply_namu_payload_to_starters(
+    namu: Dict[str, str],
+    away_starter: str,
+    home_starter: str,
+) -> tuple[str, str, str, str, str, str]:
+    if _is_missing_starter_name(away_starter) and namu.get("away_starter"):
+        away_starter = str(namu.get("away_starter") or "").strip()
+    if _is_missing_starter_name(home_starter) and namu.get("home_starter"):
+        home_starter = str(namu.get("home_starter") or "").strip()
+    away_year = str(namu.get("away_starter_birth_year") or "").strip()
+    home_year = str(namu.get("home_starter_birth_year") or "").strip()
+    away_date = str(namu.get("away_starter_birth_date") or "").strip()
+    home_date = str(namu.get("home_starter_birth_date") or "").strip()
+    return away_starter, home_starter, away_year, home_year, away_date, home_date
 
 
 def ensure_game_starters_from_namu(game_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -718,29 +780,57 @@ def ensure_game_starters_from_namu(game_info: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         return game_info
 
-    _NAMU_WIKI_MONTH_CACHE.pop(f"{target.year}-{target.month:02d}", None)
+    away_team_id = str(game.get("AWAY_ID", "") or "")
+    home_team_id = str(game.get("HOME_ID", "") or "")
+    season_id = str(game_info.get("season_id") or game.get("SEASON_ID") or "")
+    sr_id = str(game.get("SR_ID", "0") or "0")
+
     away_starter, home_starter, away_starter_id, home_starter_id = _resolve_game_starter_names(
         game, target
     )
+    if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
+        namu_retry = _fetch_namu_wiki_starters_for_game(
+            target, away_team_id, home_team_id, force_refresh=True
+        )
+        away_starter, home_starter, away_year, home_year, away_date, home_date = (
+            _apply_namu_payload_to_starters(namu_retry, away_starter, home_starter)
+        )
+        if not away_starter_id and not _is_missing_starter_name(away_starter):
+            away_starter_id = _resolve_pitcher_id_from_search(
+                away_starter, away_team_id, away_year, away_date
+            )
+        if not home_starter_id and not _is_missing_starter_name(home_starter):
+            home_starter_id = _resolve_pitcher_id_from_search(
+                home_starter, home_team_id, home_year, home_date
+            )
 
     updated = dict(game_info)
-    updated["away_starter"] = away_starter
-    updated["home_starter"] = home_starter
+    updated["away_starter"] = away_starter if not _is_missing_starter_name(away_starter) else "미정"
+    updated["home_starter"] = home_starter if not _is_missing_starter_name(home_starter) else "미정"
     updated["away_starter_id"] = away_starter_id
     updated["home_starter_id"] = home_starter_id
 
-    is_away = str(game.get("AWAY_ID", "")) == HANWHA_TEAM_ID
+    is_away = away_team_id == HANWHA_TEAM_ID
     hanwha_starter = away_starter if is_away else home_starter
     if _is_missing_starter_name(hanwha_starter):
         hanwha_starter = _extract_hanwha_starter(game) or "미정"
-    updated["hanwha_starter"] = hanwha_starter
+    updated["hanwha_starter"] = hanwha_starter if not _is_missing_starter_name(hanwha_starter) else "미정"
 
-    season_id = str(game_info.get("season_id") or game.get("SEASON_ID") or "")
+    analysis_stats = _fetch_pitcher_record_analysis(
+        season_id=season_id,
+        sr_id=sr_id,
+        away_team_id=away_team_id,
+        away_pit_id=away_starter_id,
+        home_team_id=home_team_id,
+        home_pit_id=home_starter_id,
+    )
     for side, pitcher_id in (("away", away_starter_id), ("home", home_starter_id)):
         if not pitcher_id:
             continue
         stats = _fetch_pitcher_stats(pitcher_id) or {}
-        updated[f"{side}_starter_stats"] = stats or updated.get(f"{side}_starter_stats") or {"war": "-"}
+        analysis = analysis_stats.get(side, {})
+        stats["war"] = analysis.get("war") or stats.get("war") or "-"
+        updated[f"{side}_starter_stats"] = stats
         image_url = stats.get("image_url") or _face_image_url(season_id, pitcher_id)
         if image_url:
             updated[f"{side}_starter_image"] = image_url
@@ -2734,7 +2824,20 @@ def _fetch_pitcher_birth_year(player_id: str) -> str:
     return ""
 
 
-def _resolve_pitcher_id_from_search(player_name: str, team_id: str, birth_year_hint: str = "") -> str:
+def _fetch_pitcher_birth_date(player_id: str) -> str:
+    pid = str(player_id or "").strip()
+    if not pid:
+        return ""
+    birth_date = str((_fetch_pitcher_stats(pid) or {}).get("birth_date") or "").strip()
+    return birth_date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", birth_date) else ""
+
+
+def _resolve_pitcher_id_from_search(
+    player_name: str,
+    team_id: str,
+    birth_year_hint: str = "",
+    birth_date_hint: str = "",
+) -> str:
     """
     Resolve playerId from KBO player search endpoint.
     Prefer active roster and team match.
@@ -2766,8 +2869,8 @@ def _resolve_pitcher_id_from_search(player_name: str, team_id: str, birth_year_h
     filtered = [p for p in candidates if str(p.get("T_ID", "")) == str(team_id)]
     target_pool = filtered if filtered else candidates
 
-    # 동명이인 대응: 나무위키 링크에 "(YYYY)" 힌트가 있으면 해당 출생연도로 우선 매칭한다.
-    if birth_year_hint and len(target_pool) > 1:
+    # 동명이인 대응: 나무위키 링크의 출생일/출생연도 힌트로 우선 매칭한다.
+    if len(target_pool) > 1 and (birth_date_hint or birth_year_hint):
         for cand in target_pool:
             cand_pid = str(cand.get("P_ID", "")).strip()
             if not cand_pid:
@@ -2776,7 +2879,13 @@ def _resolve_pitcher_id_from_search(player_name: str, team_id: str, birth_year_h
                 cand_pid = m.group(1) if m else ""
             if not cand_pid:
                 continue
-            if _fetch_pitcher_birth_year(cand_pid) == birth_year_hint:
+            cand_birth_date = _fetch_pitcher_birth_date(cand_pid)
+            if birth_date_hint and cand_birth_date == birth_date_hint:
+                return cand_pid
+            if birth_year_hint and (
+                cand_birth_date.startswith(f"{birth_year_hint}-")
+                or _fetch_pitcher_birth_year(cand_pid) == birth_year_hint
+            ):
                 return cand_pid
 
     target = target_pool[0]
@@ -3302,26 +3411,36 @@ def _resolve_game_starter_names(
 
     away_birth_year_hint = ""
     home_birth_year_hint = ""
+    away_birth_date_hint = ""
+    home_birth_date_hint = ""
     if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
         namu_starters = _fetch_namu_wiki_starters_for_game(
             target,
             str(game.get("AWAY_ID", "")),
             str(game.get("HOME_ID", "")),
         )
-        if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
-            away_starter = namu_starters["away_starter"]
-            away_birth_year_hint = str(namu_starters.get("away_starter_birth_year") or "").strip()
-        if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
-            home_starter = namu_starters["home_starter"]
-            home_birth_year_hint = str(namu_starters.get("home_starter_birth_year") or "").strip()
+        (
+            away_starter,
+            home_starter,
+            away_birth_year_hint,
+            home_birth_year_hint,
+            away_birth_date_hint,
+            home_birth_date_hint,
+        ) = _apply_namu_payload_to_starters(namu_starters, away_starter, home_starter)
 
     if not away_starter_id and not _is_missing_starter_name(away_starter):
         away_starter_id = _resolve_pitcher_id_from_search(
-            away_starter, str(game.get("AWAY_ID", "")), away_birth_year_hint
+            away_starter,
+            str(game.get("AWAY_ID", "")),
+            away_birth_year_hint,
+            away_birth_date_hint,
         )
     if not home_starter_id and not _is_missing_starter_name(home_starter):
         home_starter_id = _resolve_pitcher_id_from_search(
-            home_starter, str(game.get("HOME_ID", "")), home_birth_year_hint
+            home_starter,
+            str(game.get("HOME_ID", "")),
+            home_birth_year_hint,
+            home_birth_date_hint,
         )
 
     # Right before falling back to "미정", do one more forced Namu check (cache bypass)
@@ -3333,20 +3452,32 @@ def _resolve_game_starter_names(
             str(game.get("HOME_ID", "")),
             force_refresh=True,
         )
-        if _is_missing_starter_name(away_starter) and namu_retry.get("away_starter"):
-            away_starter = namu_retry["away_starter"]
-            away_birth_year_hint = str(namu_retry.get("away_starter_birth_year") or "").strip() or away_birth_year_hint
-        if _is_missing_starter_name(home_starter) and namu_retry.get("home_starter"):
-            home_starter = namu_retry["home_starter"]
-            home_birth_year_hint = str(namu_retry.get("home_starter_birth_year") or "").strip() or home_birth_year_hint
+        (
+            away_starter,
+            home_starter,
+            retry_away_year,
+            retry_home_year,
+            retry_away_date,
+            retry_home_date,
+        ) = _apply_namu_payload_to_starters(namu_retry, away_starter, home_starter)
+        away_birth_year_hint = retry_away_year or away_birth_year_hint
+        home_birth_year_hint = retry_home_year or home_birth_year_hint
+        away_birth_date_hint = retry_away_date or away_birth_date_hint
+        home_birth_date_hint = retry_home_date or home_birth_date_hint
 
     if not away_starter_id and not _is_missing_starter_name(away_starter):
         away_starter_id = _resolve_pitcher_id_from_search(
-            away_starter, str(game.get("AWAY_ID", "")), away_birth_year_hint
+            away_starter,
+            str(game.get("AWAY_ID", "")),
+            away_birth_year_hint,
+            away_birth_date_hint,
         )
     if not home_starter_id and not _is_missing_starter_name(home_starter):
         home_starter_id = _resolve_pitcher_id_from_search(
-            home_starter, str(game.get("HOME_ID", "")), home_birth_year_hint
+            home_starter,
+            str(game.get("HOME_ID", "")),
+            home_birth_year_hint,
+            home_birth_date_hint,
         )
 
     away_starter = away_starter.strip() if away_starter else ""
@@ -3459,32 +3590,6 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 game, target
             )
 
-            away_birth_hint = ""
-            home_birth_hint = ""
-            if _is_missing_starter_name(away_starter) or _is_missing_starter_name(home_starter):
-                namu_starters = _fetch_namu_wiki_starters_for_game(
-                    target,
-                    str(game.get("AWAY_ID", "")),
-                    str(game.get("HOME_ID", "")),
-                    force_refresh=True,
-                )
-                if _is_missing_starter_name(away_starter) and namu_starters.get("away_starter"):
-                    away_starter = namu_starters["away_starter"]
-                    away_birth_hint = str(namu_starters.get("away_starter_birth_year") or "").strip()
-                if _is_missing_starter_name(home_starter) and namu_starters.get("home_starter"):
-                    home_starter = namu_starters["home_starter"]
-                    home_birth_hint = str(namu_starters.get("home_starter_birth_year") or "").strip()
-
-            # Final fallback: resolve starter IDs by name via player search endpoint.
-            if not away_starter_id and not _is_missing_starter_name(away_starter):
-                away_starter_id = _resolve_pitcher_id_from_search(
-                    away_starter, str(game.get("AWAY_ID", "")), away_birth_hint
-                )
-            if not home_starter_id and not _is_missing_starter_name(home_starter):
-                home_starter_id = _resolve_pitcher_id_from_search(
-                    home_starter, str(game.get("HOME_ID", "")), home_birth_hint
-                )
-
             away_starter_stats = _fetch_pitcher_stats(away_starter_id)
             home_starter_stats = _fetch_pitcher_stats(home_starter_id)
             if _is_missing_starter_name(away_starter):
@@ -3544,7 +3649,8 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             season_schedule = _get_hanwha_season_schedule_cached(season_id)
             league_probable_games = _build_same_day_probable_games(target, game_id)
 
-            return {
+            return ensure_game_starters_from_namu(
+                {
                 "season_id": season_id,
                 "game_id": game_id,
                 "game_date": game.get("G_DT_TXT", ""),
@@ -3588,5 +3694,6 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "league_probable_games": league_probable_games,
                 "league_results_date": league_results_ymd,
                 "league_results_games": league_results_games,
-            }
+                }
+            )
     return None
