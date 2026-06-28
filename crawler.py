@@ -62,6 +62,25 @@ KBO_ID_TO_NAMU_TEAM_SHORT = {
     "OB": "두산",
 }
 _NAMU_TEAM_SHORTS = set(KBO_ID_TO_NAMU_TEAM_SHORT.values())
+_NAMU_TEAM_LABEL_ALIASES = {
+    "kt": "KT",
+    "kt wiz": "KT",
+    "kt위즈": "KT",
+    "kia": "KIA",
+    "타이거즈": "KIA",
+    "ssg": "SSG",
+    "sk": "SSG",
+    "wiz": "KT",
+    "nc": "NC",
+    "lg": "LG",
+    "ob": "두산",
+    "두산": "두산",
+    "wo": "키움",
+    "히어로즈": "키움",
+    "lt": "롯데",
+    "ss": "삼성",
+    "hh": "한화",
+}
 _NAMU_INVALID_STARTER_TOKENS = {
     "",
     "-",
@@ -614,7 +633,55 @@ def _extract_namu_lineup_chunk(html: str, target: date) -> str:
                 break
     if best_idx < 0:
         return ""
-    return html[best_idx : best_idx + 25000]
+    return html[best_idx : best_idx + 40000]
+
+
+def _parse_namu_starters_from_scoreboard_table(soup: BeautifulSoup) -> Dict[str, str]:
+    """Parse the per-game scoreboard table: 팀 | 선발 | 1회 ..."""
+    starters: Dict[str, str] = {}
+    for table in soup.find_all("table"):
+        rows: list[list[str]] = []
+        for tr in table.find_all("tr"):
+            cells = [cell.get_text(" ", strip=True) for cell in tr.find_all(["td", "th"])]
+            if cells:
+                rows.append(cells)
+
+        header_idx = -1
+        for idx, row in enumerate(rows):
+            if len(row) >= 2 and row[0] == "팀" and row[1] == "선발":
+                header_idx = idx
+                break
+        if header_idx < 0:
+            continue
+
+        for row in rows[header_idx + 1 :]:
+            if len(row) < 2:
+                continue
+            if row[0] in {"중계채널"} or "중계" in row[0]:
+                break
+            team = _normalize_namu_team_label(row[0])
+            candidate = row[1].strip()
+            if not team or not _is_valid_namu_starter_name(candidate):
+                continue
+            starters[team] = candidate
+        if starters:
+            return starters
+    return starters
+
+
+def _normalize_namu_team_label(team: str) -> str:
+    token = (team or "").strip()
+    if not token:
+        return ""
+    if token in _NAMU_TEAM_SHORTS:
+        return token
+    lowered = token.lower()
+    if lowered in _NAMU_TEAM_LABEL_ALIASES:
+        return _NAMU_TEAM_LABEL_ALIASES[lowered]
+    for short in _NAMU_TEAM_SHORTS:
+        if lowered == short.lower():
+            return short
+    return ""
 
 
 def _parse_namu_starter_name_from_cell(cell) -> str:
@@ -635,19 +702,22 @@ def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
         return {}
 
     soup = BeautifulSoup(chunk, "html.parser")
-    starters: Dict[str, str] = {}
+    starters = _parse_namu_starters_from_scoreboard_table(soup)
+    if len(starters) >= 2:
+        return starters
+
     for row in soup.find_all("tr"):
         cells = row.find_all("td")
         if len(cells) < 2:
             continue
-        team = cells[0].get_text(" ", strip=True)
+        team = _normalize_namu_team_label(cells[0].get_text(" ", strip=True))
         candidate = _parse_namu_starter_name_from_cell(cells[1])
         if not candidate:
             continue
-        if team == "선발 투수":
+        if cells[0].get_text(" ", strip=True) == "선발 투수":
             starters.setdefault("한화", candidate)
             continue
-        if team not in _NAMU_TEAM_SHORTS:
+        if not team:
             continue
         starters[team] = candidate
 
@@ -657,14 +727,15 @@ def _parse_namu_starters_for_date(html: str, target: date) -> Dict[str, str]:
     plain = re.sub(r"<[^>]+>", "|", chunk)
     parts = [part.strip() for part in plain.split("|") if part.strip()]
     for idx_part, part in enumerate(parts):
-        if part not in _NAMU_TEAM_SHORTS:
+        team = _normalize_namu_team_label(part)
+        if not team:
             continue
         if idx_part + 1 >= len(parts):
             continue
         candidate = parts[idx_part + 1].strip()
         if not _is_valid_namu_starter_name(candidate):
             continue
-        starters.setdefault(part, candidate)
+        starters.setdefault(team, candidate)
         if len(starters) >= 2:
             break
     return starters
@@ -685,8 +756,8 @@ def _parse_namu_starter_birthyear_hints_for_date(html: str, target: date) -> Dic
         cells = row.find_all("td")
         if len(cells) < 2:
             continue
-        team = cells[0].get_text(" ", strip=True)
-        if team not in _NAMU_TEAM_SHORTS and team != "선발 투수":
+        team = _normalize_namu_team_label(cells[0].get_text(" ", strip=True))
+        if not team and cells[0].get_text(" ", strip=True) != "선발 투수":
             continue
         link = cells[1].find("a")
         if not link:
