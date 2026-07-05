@@ -941,7 +941,7 @@ def _game_cancel_label(game: Dict[str, Any]) -> str:
     if not _is_cancelled_game(game):
         return ""
     cancel_name = str(game.get("CANCEL_SC_NM", "") or "").strip()
-    if "우천" in cancel_name:
+    if "우천" in cancel_name or "그라운드" in cancel_name:
         return "우천취소"
     return cancel_name or "취소"
 
@@ -3642,15 +3642,13 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             # before the first pitch; only treat non-scheduled(1) finished scores as "done".
             if offset == 0:
                 if _is_cancelled_game(game):
-                    # 우천취소 등: 익일 경기 선발이 공개돼 있으면 익일 경기를 메인으로 표시한다.
-                    if _find_hanwha_game_with_published_starters_on_date(target + timedelta(days=1)):
+                    # 우천·그라운드사정 등 취소: 종료된 경기로 보고 다음 예정 경기를 표시한다.
+                    continue
+                if _is_final_game(game):
+                    continue
+                if _is_finished_game(game) and not _is_live_game(game):
+                    if (str(game.get("GAME_STATE_SC", "") or "").strip() != "1"):
                         continue
-                else:
-                    if _is_final_game(game):
-                        continue
-                    if _is_finished_game(game) and not _is_live_game(game):
-                        if (str(game.get("GAME_STATE_SC", "") or "").strip() != "1"):
-                            continue
 
             is_away = game.get("AWAY_ID") == HANWHA_TEAM_ID
             opponent_name = game.get("HOME_NM") if is_away else game.get("AWAY_NM")
