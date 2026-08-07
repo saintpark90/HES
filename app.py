@@ -1,7 +1,9 @@
 import base64
 import io
+import json
 import os
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -17,6 +19,34 @@ REPLICATE_API_BASE = "https://api.replicate.com/v1"
 REPLICATE_MODEL_OWNER = os.getenv("REPLICATE_MODEL_OWNER", "nightmareai")
 REPLICATE_MODEL_NAME = os.getenv("REPLICATE_MODEL_NAME", "real-esrgan")
 KST = ZoneInfo("Asia/Seoul")
+GAME_DATA_PATH = Path(__file__).resolve().parent / "game-data.json"
+
+
+def _load_game_data_json() -> tuple[dict | None, str]:
+    """Load locally baked game-data.json for fast Flask preview."""
+    if not GAME_DATA_PATH.exists():
+        return None, ""
+    try:
+        payload = json.loads(GAME_DATA_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None, ""
+    game_info = payload.get("game_info")
+    updated_at = str(payload.get("updated_at") or "").strip()
+    if isinstance(game_info, dict) and game_info:
+        return game_info, updated_at
+    return None, updated_at
+
+
+def _resolve_game_info(*, force_fresh: bool = False) -> tuple[dict | None, str]:
+    """
+    Prefer game-data.json for local verification unless ?fresh=1 is passed.
+    """
+    if not force_fresh:
+        cached, updated_at = _load_game_data_json()
+        if cached is not None:
+            return cached, updated_at or _now_iso()
+    game_info = get_next_hanwha_game()
+    return game_info, _now_iso()
 
 
 def _download_image_bytes(image_url: str) -> bytes:
@@ -113,22 +143,25 @@ def _now_iso() -> str:
 
 @app.get("/")
 def index():
-    game_info = get_next_hanwha_game()
+    force_fresh = str(request.args.get("fresh", "") or "").strip() in {"1", "true", "yes"}
+    game_info, updated_at = _resolve_game_info(force_fresh=force_fresh)
     og = _build_og_context(game_info)
-    return render_template("index.html", game_info=game_info, og=og, updated_at=_now_iso())
+    return render_template("index.html", game_info=game_info, og=og, updated_at=updated_at)
 
 
 @app.get("/share/hanwha-next")
 def share_hanwha_next():
-    game_info = get_next_hanwha_game()
+    force_fresh = str(request.args.get("fresh", "") or "").strip() in {"1", "true", "yes"}
+    game_info, updated_at = _resolve_game_info(force_fresh=force_fresh)
     og = _build_og_context(game_info)
-    return render_template("index.html", game_info=game_info, og=og, updated_at=_now_iso())
+    return render_template("index.html", game_info=game_info, og=og, updated_at=updated_at)
 
 
 @app.get("/api/game-info")
 def game_info_api():
-    game_info = get_next_hanwha_game()
-    return jsonify({"ok": True, "game_info": game_info, "updated_at": _now_iso()})
+    force_fresh = str(request.args.get("fresh", "") or "").strip() in {"1", "true", "yes"}
+    game_info, updated_at = _resolve_game_info(force_fresh=force_fresh)
+    return jsonify({"ok": True, "game_info": game_info, "updated_at": updated_at})
 
 
 @app.get("/thumbnail.svg")

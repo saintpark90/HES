@@ -260,6 +260,173 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _has_consecutive_threshold(
+    values: list[Optional[float]], threshold: float, *, min_hours: int = 2
+) -> bool:
+    streak = 0
+    for value in values:
+        if value is not None and value >= threshold:
+            streak += 1
+            if streak >= min_hours:
+                return True
+        else:
+            streak = 0
+    return False
+
+
+def _build_weather_cancel_warnings(
+    *,
+    hourly_items: list[Dict[str, Any]],
+    dust_hourly_pm10: list[Optional[float]],
+    dust_hourly_pm25: list[Optional[float]],
+) -> list[Dict[str, Any]]:
+    """KBO 기상 관련 경기 취소 기준 중 현재 예보에 해당하는 항목만 반환."""
+    warnings: list[Dict[str, Any]] = []
+
+    winds = [_safe_float(item.get("wind_speed")) for item in hourly_items]
+    gusts = [_safe_float(item.get("wind_gust")) for item in hourly_items]
+    max_wind = max((v for v in winds if v is not None), default=None)
+    max_gust = max((v for v in gusts if v is not None), default=None)
+    if (max_wind is not None and max_wind >= 21) or (max_gust is not None and max_gust >= 26):
+        warnings.append(
+            {
+                "type": "wind",
+                "level": "경보",
+                "title": "강풍 경보",
+                "observed": (
+                    f"예상 최대 풍속 {max_wind:.1f}m/s"
+                    if max_wind is not None
+                    else "예상 풍속 정보 없음"
+                )
+                + (
+                    f" · 순간풍속 {max_gust:.1f}m/s"
+                    if max_gust is not None
+                    else ""
+                ),
+                "details": [
+                    "풍속 21m/s 이상 또는 순간 풍속 26m/s 이상이 예상될 때",
+                ],
+            }
+        )
+    elif (max_wind is not None and max_wind >= 14) or (max_gust is not None and max_gust >= 20):
+        warnings.append(
+            {
+                "type": "wind",
+                "level": "주의보",
+                "title": "강풍 주의보",
+                "observed": (
+                    f"예상 최대 풍속 {max_wind:.1f}m/s"
+                    if max_wind is not None
+                    else "예상 풍속 정보 없음"
+                )
+                + (
+                    f" · 순간풍속 {max_gust:.1f}m/s"
+                    if max_gust is not None
+                    else ""
+                ),
+                "details": [
+                    "풍속 14m/s 이상, 순간 풍속 20m/s 이상이 예상될 때",
+                ],
+            }
+        )
+
+    temps = [_safe_float(item.get("temperature")) for item in hourly_items]
+    max_temp = max((v for v in temps if v is not None), default=None)
+    if max_temp is not None and max_temp > 30:
+        heat_details = [
+            "주의보: 일 최고 기온이 섭씨 33도 이상인 상태가 2일 이상 지속될 것으로 예상될 때",
+            "경보: 일 최고 기온이 섭씨 35도 이상인 상태가 2일 이상 지속될 것으로 예상될 때",
+        ]
+        if max_temp >= 35:
+            heat_level = "경보"
+            heat_title = "폭염 경보"
+            heat_outlook = (
+                f"이 날짜 경기는 예상 최고기온이 {max_temp:.1f}°C로 "
+                "폭염 경보 기준(35°C)에 해당해 취소될 가능성이 높아 보입니다."
+            )
+        elif max_temp >= 33:
+            heat_level = "주의보"
+            heat_title = "폭염 주의보"
+            heat_outlook = (
+                f"이 날짜 경기는 예상 최고기온이 {max_temp:.1f}°C로 "
+                "폭염 주의보 기준(33°C)에 해당해 취소될 가능성이 있습니다."
+            )
+        else:
+            heat_level = "관심"
+            heat_title = "폭염 취소 관련 안내"
+            heat_outlook = (
+                f"이 날짜 경기는 예상 최고기온이 {max_temp:.1f}°C로 30°C를 넘지만, "
+                "공식 주의보 기준(33°C)보다는 낮아 경기는 진행될 것으로 보입니다."
+            )
+        warnings.append(
+            {
+                "type": "heat",
+                "level": heat_level,
+                "title": heat_title,
+                "observed": f"예상 최고기온 {max_temp:.1f}°C",
+                "outlook": heat_outlook,
+                "details": heat_details,
+            }
+        )
+
+    dust_warning = _has_consecutive_threshold(
+        dust_hourly_pm25, 150
+    ) or _has_consecutive_threshold(dust_hourly_pm10, 300)
+    dust_watch = _has_consecutive_threshold(
+        dust_hourly_pm25, 75
+    ) or _has_consecutive_threshold(dust_hourly_pm10, 150)
+    peak_pm10 = max((v for v in dust_hourly_pm10 if v is not None), default=None)
+    peak_pm25 = max((v for v in dust_hourly_pm25 if v is not None), default=None)
+    dust_observed_parts = []
+    if peak_pm10 is not None:
+        dust_observed_parts.append(f"PM10 최고 {peak_pm10:.0f}㎍/m³")
+    if peak_pm25 is not None:
+        dust_observed_parts.append(f"PM2.5 최고 {peak_pm25:.0f}㎍/m³")
+    dust_observed = " · ".join(dust_observed_parts) if dust_observed_parts else ""
+
+    if dust_warning:
+        warnings.append(
+            {
+                "type": "dust",
+                "level": "경보",
+                "title": "미세먼지 경보",
+                "observed": dust_observed,
+                "details": [
+                    "PM2.5 150μg/m³ 이상 또는 PM10 300μg/m³ 이상이 2시간 이상 지속인 때",
+                    "단, 경기개시 전에 미세먼지(초미세먼지 포함) 경보가 발령되었거나 경보 발령 기준 농도를 초과한 경우 취소여부를 결정하고, 경기개시 후에 미세먼지 경보가 발령되었을 경우 경기 취소여부를 결정한다. (경기 중 경보발령시 해당 이닝 종료 후 취소여부 결정)",
+                ],
+            }
+        )
+    elif dust_watch:
+        warnings.append(
+            {
+                "type": "dust",
+                "level": "주의보",
+                "title": "미세먼지 주의보",
+                "observed": dust_observed,
+                "details": [
+                    "PM2.5 75μg/m³ 이상 또는 PM10 150μg/m³ 이상이 2시간 이상 지속인 때",
+                ],
+            }
+        )
+
+    if _has_consecutive_threshold(dust_hourly_pm10, 800):
+        warnings.append(
+            {
+                "type": "yellow_dust",
+                "level": "경보",
+                "title": "황사 경보",
+                "observed": dust_observed,
+                "details": [
+                    "황사로 인해 1시간 평균 미세먼지 농도 800㎍/㎥ 이상이 2시간 이상 지속될 것으로 예상될 때",
+                    "황사 주의보는 미세먼지 경보로 대체",
+                ],
+            }
+        )
+
+    return warnings
+
+
 def _build_game_weather_info(target_date: date, game_time: str, stadium_name: str) -> Dict[str, Any]:
     coords = _resolve_stadium_coords(stadium_name)
     if not coords:
@@ -292,7 +459,11 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
         "latitude": coords["lat"],
         "longitude": coords["lon"],
         "timezone": "Asia/Seoul",
-        "hourly": "temperature_2m,weather_code,precipitation_probability",
+        "wind_speed_unit": "ms",
+        "hourly": (
+            "temperature_2m,weather_code,precipitation_probability,"
+            "wind_speed_10m,wind_gusts_10m"
+        ),
         "start_date": target_date.isoformat(),
         "end_date": (target_date + timedelta(days=1)).isoformat() if include_midnight else target_date.isoformat(),
     }
@@ -308,12 +479,16 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
     weather_codes = hourly.get("weather_code") or []
     temperatures = hourly.get("temperature_2m") or []
     rain_probs = hourly.get("precipitation_probability") or []
+    wind_speeds = hourly.get("wind_speed_10m") or []
+    wind_gusts = hourly.get("wind_gusts_10m") or []
     by_time: Dict[str, Dict[str, Any]] = {}
     for idx, raw_time in enumerate(times):
         by_time[str(raw_time)] = {
             "code": int(weather_codes[idx]) if idx < len(weather_codes) and weather_codes[idx] is not None else 0,
             "temp": temperatures[idx] if idx < len(temperatures) else None,
             "pop": rain_probs[idx] if idx < len(rain_probs) else None,
+            "wind": wind_speeds[idx] if idx < len(wind_speeds) else None,
+            "gust": wind_gusts[idx] if idx < len(wind_gusts) else None,
         }
 
     hourly_items: list[Dict[str, Any]] = []
@@ -328,6 +503,8 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
         label = "24:00" if is_midnight else hour_dt.strftime("%H:00")
         game_start_label = game_start.strftime("%H:%M") if game_start else ""
         is_game_start = bool(game_start_label) and game_start_label.startswith(label[:2] + ":")
+        wind_val = _safe_float(entry.get("wind"))
+        gust_val = _safe_float(entry.get("gust"))
         hourly_items.append(
             {
                 "time_label": label,
@@ -339,6 +516,8 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
                     if entry.get("temp") is not None and entry.get("temp") != ""
                     else "-"
                 ),
+                "wind_speed": f"{wind_val:.1f}" if wind_val is not None else "-",
+                "wind_gust": f"{gust_val:.1f}" if gust_val is not None else "-",
                 "is_game_start": is_game_start,
             }
         )
@@ -372,10 +551,12 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
         "longitude": coords["lon"],
         "timezone": "Asia/Seoul",
         "hourly": "pm10,pm2_5",
-        "start_date": now_kst.date().isoformat(),
-        "end_date": now_kst.date().isoformat(),
+        "start_date": target_date.isoformat(),
+        "end_date": target_date.isoformat(),
     }
     dust = {"pm10": "-", "pm2_5": "-", "grade": "-"}
+    dust_hourly_pm10: list[Optional[float]] = []
+    dust_hourly_pm25: list[Optional[float]] = []
     try:
         aq_resp = _http_get_with_retries(OPENMETEO_AIR_QUALITY_URL, params=aq_params, timeout=12)
         aq_resp.raise_for_status()
@@ -384,18 +565,42 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
         aq_times = aq_hourly.get("time") or []
         pm10_values = aq_hourly.get("pm10") or []
         pm25_values = aq_hourly.get("pm2_5") or []
+        for idx, _raw in enumerate(aq_times):
+            dust_hourly_pm10.append(_safe_float(pm10_values[idx] if idx < len(pm10_values) else None))
+            dust_hourly_pm25.append(_safe_float(pm25_values[idx] if idx < len(pm25_values) else None))
         now_hour_key = now_kst.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:00")
         pick_idx = aq_times.index(now_hour_key) if now_hour_key in aq_times else (len(aq_times) - 1)
         if pick_idx >= 0:
-            pm10 = _safe_float(pm10_values[pick_idx] if pick_idx < len(pm10_values) else None)
-            pm25 = _safe_float(pm25_values[pick_idx] if pick_idx < len(pm25_values) else None)
+            pm10 = dust_hourly_pm10[pick_idx] if pick_idx < len(dust_hourly_pm10) else None
+            pm25 = dust_hourly_pm25[pick_idx] if pick_idx < len(dust_hourly_pm25) else None
             if pm10 is not None:
                 dust["pm10"] = f"{pm10:.0f}"
                 dust["grade"] = _dust_grade(pm10)
             if pm25 is not None:
                 dust["pm2_5"] = f"{pm25:.0f}"
+        # 당일 현재값이 없으면 예보 피크로 요약 표시
+        if dust["pm10"] == "-":
+            peak_pm10 = max((v for v in dust_hourly_pm10 if v is not None), default=None)
+            if peak_pm10 is not None:
+                dust["pm10"] = f"{peak_pm10:.0f}"
+                dust["grade"] = _dust_grade(peak_pm10)
+        if dust["pm2_5"] == "-":
+            peak_pm25 = max((v for v in dust_hourly_pm25 if v is not None), default=None)
+            if peak_pm25 is not None:
+                dust["pm2_5"] = f"{peak_pm25:.0f}"
     except Exception:
         pass
+
+    # 시간별 미세먼지 예보가 비면 요약값으로라도 주의보 판정에 활용
+    if not any(v is not None for v in dust_hourly_pm10 + dust_hourly_pm25):
+        dust_hourly_pm10 = [_safe_float(dust.get("pm10"))]
+        dust_hourly_pm25 = [_safe_float(dust.get("pm2_5"))]
+
+    cancel_warnings = _build_weather_cancel_warnings(
+        hourly_items=hourly_items,
+        dust_hourly_pm10=dust_hourly_pm10,
+        dust_hourly_pm25=dust_hourly_pm25,
+    )
 
     return {
         "region": coords["region"],
@@ -403,6 +608,7 @@ def _build_game_weather_info(target_date: date, game_time: str, stadium_name: st
         "hourly": hourly_items,
         "game_progress_probability": progress_probability,
         "dust": dust,
+        "cancel_warnings": cancel_warnings,
         "updated_at": now_kst.replace(microsecond=0).isoformat(),
     }
 
@@ -3404,9 +3610,12 @@ def _fetch_league_scoreboard_for_date(target: date) -> tuple[str, list[Dict[str,
 def _should_show_today_league_scoreboard(today: date) -> bool:
     """
     한화 당일 경기가 아직 예정(1)이면 어제 전체 결과를, 시작·종료 이후면 당일 결과를 보여준다.
+    폭염·우천 등 취소만 있는 날은 당일 스코어보드로 보지 않는다.
     """
     game = _hanwha_game_on_calendar_day(today)
     if not game:
+        return False
+    if _is_cancelled_game(game):
         return False
     state = str(game.get("GAME_STATE_SC", "") or "").strip()
     if state == "1":
@@ -3418,9 +3627,25 @@ def _should_show_today_league_scoreboard(today: date) -> bool:
     return False
 
 
+def _league_scoreboard_has_real_results(rows: list[Dict[str, Any]]) -> bool:
+    """True if at least one game has a play outcome (not cancel-only / empty)."""
+    for row in rows:
+        result = str(row.get("result") or "").strip()
+        if result and result != "취소":
+            return True
+    return False
+
+
 def _resolve_league_results_scoreboard(today: date) -> tuple[str, list[Dict[str, Any]]]:
+    """
+    Pick today's or yesterday's league scoreboard.
+    If that day is cancel-only (no real results), return an empty list so the UI hides the section.
+    """
     target = today if _should_show_today_league_scoreboard(today) else today - timedelta(days=1)
-    return _fetch_league_scoreboard_for_date(target)
+    ymd, rows = _fetch_league_scoreboard_for_date(target)
+    if not _league_scoreboard_has_real_results(rows):
+        return ymd, []
+    return ymd, rows
 
 
 def _get_hanwha_season_schedule_cached(season_id: str) -> list[Dict[str, Any]]:
@@ -3582,7 +3807,10 @@ def _find_hanwha_game_with_published_starters_on_date(target: date) -> Optional[
 
 
 def _build_same_day_probable_games(target: date, hanwha_game_id: str) -> list[Dict[str, Any]]:
-    """Build non-Hanwha same-day game cards with probable starters."""
+    """Build non-Hanwha same-day game cards with probable starters.
+
+    Games where both starters are still TBD are omitted; if none remain, the UI hides the section.
+    """
     try:
         games = _fetch_games(target)
     except Exception:
@@ -3601,6 +3829,9 @@ def _build_same_day_probable_games(target: date, hanwha_game_id: str) -> list[Di
         away_starter, home_starter, away_starter_id, home_starter_id = _resolve_game_starter_names(game, target)
         away_starter = away_starter if not _is_missing_starter_name(away_starter) else "미정"
         home_starter = home_starter if not _is_missing_starter_name(home_starter) else "미정"
+        # KBO/나무위키에 선발이 아직 없으면 카드 자체를 만들지 않는다.
+        if _is_missing_starter_name(away_starter) and _is_missing_starter_name(home_starter):
+            continue
 
         rows.append(
             {
@@ -3638,12 +3869,12 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
         for game in games:
             if not _is_hanwha_game(game):
                 continue
+            # 우천·폭염 등 취소 경기는 날짜와 무관하게 "다음 경기" 후보에서 제외한다.
+            if _is_cancelled_game(game):
+                continue
             # Skip today's game once it is over so "다음 경기" is tomorrow (KST). SCORE_CK can appear
             # before the first pitch; only treat non-scheduled(1) finished scores as "done".
             if offset == 0:
-                if _is_cancelled_game(game):
-                    # 우천·그라운드사정 등 취소: 종료된 경기로 보고 다음 예정 경기를 표시한다.
-                    continue
                 if _is_final_game(game):
                     continue
                 if _is_finished_game(game) and not _is_live_game(game):

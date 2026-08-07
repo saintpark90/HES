@@ -407,6 +407,363 @@ const getDustGradeMeta = (value, kind) => {
   return { grade: "매우 나쁨", emoji: "🤢" };
 };
 
+const parseWeatherNumber = (value) => {
+  const n = Number.parseFloat(String(value ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+
+const getWeatherMaxTemp = (weather) => {
+  const hourly = Array.isArray(weather?.hourly) ? weather.hourly : [];
+  const temps = hourly.map((h) => parseWeatherNumber(h?.temperature)).filter((v) => v != null);
+  return temps.length ? Math.max(...temps) : null;
+};
+
+const buildHeatCancelWarning = (maxTemp) => {
+  if (maxTemp == null || !(maxTemp > 30)) return null;
+  const details = [
+    "주의보: 일 최고 기온이 섭씨 33도 이상인 상태가 2일 이상 지속될 것으로 예상될 때",
+    "경보: 일 최고 기온이 섭씨 35도 이상인 상태가 2일 이상 지속될 것으로 예상될 때",
+  ];
+  const observed = `예상 최고기온 ${maxTemp.toFixed(1)}°C`;
+  if (maxTemp >= 35) {
+    return {
+      type: "heat",
+      level: "경보",
+      title: "폭염 경보",
+      observed,
+      outlook: `이 날짜 경기는 예상 최고기온이 ${maxTemp.toFixed(1)}°C로 폭염 경보 기준(35°C)에 해당해 취소될 가능성이 높아 보입니다.`,
+      details,
+    };
+  }
+  if (maxTemp >= 33) {
+    return {
+      type: "heat",
+      level: "주의보",
+      title: "폭염 주의보",
+      observed,
+      outlook: `이 날짜 경기는 예상 최고기온이 ${maxTemp.toFixed(1)}°C로 폭염 주의보 기준(33°C)에 해당해 취소될 가능성이 있습니다.`,
+      details,
+    };
+  }
+  return {
+    type: "heat",
+    level: "관심",
+    title: "폭염 취소 관련 안내",
+    observed,
+    outlook: `이 날짜 경기는 예상 최고기온이 ${maxTemp.toFixed(1)}°C로 30°C를 넘지만, 공식 주의보 기준(33°C)보다는 낮아 경기는 진행될 것으로 보입니다.`,
+    details,
+  };
+};
+
+const buildWeatherCancelWarnings = (weather) => {
+  const maxTemp = getWeatherMaxTemp(weather);
+  const heatWarning = buildHeatCancelWarning(maxTemp);
+  const serverWarnings = Array.isArray(weather?.cancel_warnings) ? weather.cancel_warnings : [];
+  const warnings = [];
+
+  if (heatWarning) {
+    warnings.push(heatWarning);
+  }
+
+  const nonHeatServer = serverWarnings.filter((item) => item?.type && item.type !== "heat");
+  if (nonHeatServer.length) {
+    warnings.push(...nonHeatServer);
+    return warnings;
+  }
+
+  // Fallback when older cached payloads lack server-side non-heat warnings.
+  const hourly = Array.isArray(weather?.hourly) ? weather.hourly : [];
+  const winds = hourly.map((h) => parseWeatherNumber(h?.wind_speed)).filter((v) => v != null);
+  const gusts = hourly.map((h) => parseWeatherNumber(h?.wind_gust)).filter((v) => v != null);
+  const maxWind = winds.length ? Math.max(...winds) : null;
+  const maxGust = gusts.length ? Math.max(...gusts) : null;
+  if ((maxWind != null && maxWind >= 21) || (maxGust != null && maxGust >= 26)) {
+    warnings.push({
+      type: "wind",
+      level: "경보",
+      title: "강풍 경보",
+      observed: [
+        maxWind != null ? `예상 최대 풍속 ${maxWind.toFixed(1)}m/s` : "",
+        maxGust != null ? `순간풍속 ${maxGust.toFixed(1)}m/s` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      details: ["풍속 21m/s 이상 또는 순간 풍속 26m/s 이상이 예상될 때"],
+    });
+  } else if ((maxWind != null && maxWind >= 14) || (maxGust != null && maxGust >= 20)) {
+    warnings.push({
+      type: "wind",
+      level: "주의보",
+      title: "강풍 주의보",
+      observed: [
+        maxWind != null ? `예상 최대 풍속 ${maxWind.toFixed(1)}m/s` : "",
+        maxGust != null ? `순간풍속 ${maxGust.toFixed(1)}m/s` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      details: ["풍속 14m/s 이상, 순간 풍속 20m/s 이상이 예상될 때"],
+    });
+  }
+
+  const pm10 = parseWeatherNumber(weather?.dust?.pm10);
+  const pm25 = parseWeatherNumber(weather?.dust?.pm2_5);
+  const dustObserved = [
+    pm10 != null ? `PM10 ${pm10.toFixed(0)}㎍/m³` : "",
+    pm25 != null ? `PM2.5 ${pm25.toFixed(0)}㎍/m³` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  if ((pm25 != null && pm25 >= 150) || (pm10 != null && pm10 >= 300)) {
+    warnings.push({
+      type: "dust",
+      level: "경보",
+      title: "미세먼지 경보",
+      observed: dustObserved,
+      details: [
+        "PM2.5 150μg/m³ 이상 또는 PM10 300μg/m³ 이상이 2시간 이상 지속인 때",
+        "단, 경기개시 전에 미세먼지(초미세먼지 포함) 경보가 발령되었거나 경보 발령 기준 농도를 초과한 경우 취소여부를 결정하고, 경기개시 후에 미세먼지 경보가 발령되었을 경우 경기 취소여부를 결정한다. (경기 중 경보발령시 해당 이닝 종료 후 취소여부 결정)",
+      ],
+    });
+  } else if ((pm25 != null && pm25 >= 75) || (pm10 != null && pm10 >= 150)) {
+    warnings.push({
+      type: "dust",
+      level: "주의보",
+      title: "미세먼지 주의보",
+      observed: dustObserved,
+      details: ["PM2.5 75μg/m³ 이상 또는 PM10 150μg/m³ 이상이 2시간 이상 지속인 때"],
+    });
+  }
+  if (pm10 != null && pm10 >= 800) {
+    warnings.push({
+      type: "yellow_dust",
+      level: "경보",
+      title: "황사 경보",
+      observed: dustObserved,
+      details: [
+        "황사로 인해 1시간 평균 미세먼지 농도 800㎍/㎥ 이상이 2시간 이상 지속될 것으로 예상될 때",
+        "황사 주의보는 미세먼지 경보로 대체",
+      ],
+    });
+  }
+  return warnings;
+};
+
+const renderWeatherCancelWarnings = (weather) => {
+  const warnings = buildWeatherCancelWarnings(weather);
+  if (!warnings.length) return "";
+  const cards = warnings
+    .map((item) => {
+      const details = (Array.isArray(item.details) ? item.details : [])
+        .map((line) => `<li>${escapeHtml(line)}</li>`)
+        .join("");
+      let levelClass = "weather-alert--watch";
+      if (item.level === "경보") levelClass = "weather-alert--warning";
+      else if (item.level === "관심") levelClass = "weather-alert--info";
+      return `
+      <article class="weather-alert ${levelClass} weather-alert--${escapeHtml(item.type || "")}">
+        <div class="weather-alert-top">
+          <strong class="weather-alert-title">${escapeHtml(item.title || "")}</strong>
+          <span class="weather-alert-level">${escapeHtml(item.level || "")}</span>
+        </div>
+        ${item.observed ? `<div class="weather-alert-observed">${escapeHtml(item.observed)}</div>` : ""}
+        ${item.outlook ? `<p class="weather-alert-outlook">${escapeHtml(item.outlook)}</p>` : ""}
+        ${details ? `<ul class="weather-alert-details">${details}</ul>` : ""}
+      </article>`;
+    })
+    .join("");
+  return `
+    <div class="weather-alert-list">
+      <h3 class="weather-alert-heading">기상 관련 경기 취소 기준 (해당 시)</h3>
+      ${cards}
+    </div>
+  `;
+};
+
+const bindWeatherChartEvents = () => {
+  const wrap = document.querySelector(".weather-chart-wrap");
+  if (!wrap) return;
+  const tip = wrap.querySelector(".weather-chart-tip");
+  const svg = wrap.querySelector(".weather-chart-svg");
+  if (!tip || !svg) return;
+
+  const hideTip = () => {
+    tip.hidden = true;
+    tip.textContent = "";
+  };
+
+  wrap.querySelectorAll(".weather-chart-temp-hit").forEach((hit) => {
+    hit.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const temp = hit.getAttribute("data-temp");
+      const time = hit.getAttribute("data-time") || "";
+      const weather = hit.getAttribute("data-weather") || "";
+      if (!temp) return;
+      tip.hidden = false;
+      tip.textContent = `${time} ${temp}°C${weather ? ` · ${weather}` : ""}`;
+
+      const svgRect = svg.getBoundingClientRect();
+      const wrapRect = wrap.getBoundingClientRect();
+      const cx = Number.parseFloat(hit.getAttribute("data-x") || "0");
+      const cy = Number.parseFloat(hit.getAttribute("data-y") || "0");
+      const viewW = Number.parseFloat(svg.getAttribute("viewBox")?.split(/\s+/)[2] || "640");
+      const viewH = Number.parseFloat(svg.getAttribute("viewBox")?.split(/\s+/)[3] || "260");
+      const px = svgRect.left - wrapRect.left + (cx / viewW) * svgRect.width;
+      const py = svgRect.top - wrapRect.top + (cy / viewH) * svgRect.height;
+      tip.style.left = `${Math.max(8, Math.min(wrapRect.width - 8, px))}px`;
+      tip.style.top = `${Math.max(8, py - 14)}px`;
+    });
+  });
+
+  wrap.addEventListener("click", (event) => {
+    if (event.target.closest(".weather-chart-temp-hit")) return;
+    hideTip();
+  });
+};
+
+const renderWeatherHourlyChart = (hourly, dateLabel) => {
+  const points = (Array.isArray(hourly) ? hourly : [])
+    .map((item) => {
+      const tempRaw = parseWeatherNumber(item?.temperature);
+      const rainRaw = parseWeatherNumber(item?.rain_probability);
+      return {
+        time: String(item?.time_label || "").trim() || "-",
+        weather: String(item?.weather || "-").trim() || "-",
+        icon: WEATHER_ICON_MAP[item?.icon] || "🌤️",
+        temp: tempRaw,
+        rain: rainRaw != null ? Math.max(0, Math.min(100, rainRaw)) : 0,
+        isGameStart: Boolean(item?.is_game_start),
+      };
+    })
+    .filter((p) => p.time !== "-");
+  if (points.length === 0) return "";
+
+  const temps = points.map((p) => p.temp).filter((v) => v != null);
+  const tempMin = temps.length ? Math.min(...temps) : 0;
+  const tempMax = temps.length ? Math.max(...temps) : 30;
+  const tempPad = Math.max(1, (tempMax - tempMin) * 0.18);
+  // 30°C 기준선이 항상 보이도록 축 범위를 확장
+  let yTempMin = Math.min(Math.floor(tempMin - tempPad), 28);
+  let yTempMax = Math.max(Math.ceil(tempMax + tempPad), 32);
+  if (yTempMax <= yTempMin) {
+    yTempMin = 20;
+    yTempMax = 35;
+  }
+
+  const width = 640;
+  const height = 270;
+  const pad = { top: 28, right: 44, bottom: 58, left: 40 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const n = points.length;
+  const xAt = (i) => pad.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yTemp = (v) => {
+    if (v == null || yTempMax === yTempMin) return pad.top + plotH / 2;
+    return pad.top + ((yTempMax - v) / (yTempMax - yTempMin)) * plotH;
+  };
+  const yRain = (v) => pad.top + ((100 - v) / 100) * plotH;
+  const barW = Math.max(3, Math.min(14, (plotW / Math.max(n, 1)) * 0.55));
+
+  const rainBars = points
+    .map((p, i) => {
+      const x = xAt(i) - barW / 2;
+      const y = yRain(p.rain);
+      const h = Math.max(0, pad.top + plotH - y);
+      return `<rect class="weather-chart-rain-bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2"></rect>`;
+    })
+    .join("");
+
+  const tempPath = points
+    .map((p, i) => {
+      if (p.temp == null) return null;
+      const cmd = i === 0 || points[i - 1]?.temp == null ? "M" : "L";
+      return `${cmd}${xAt(i).toFixed(1)},${yTemp(p.temp).toFixed(1)}`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  const heatLineY = yTemp(30);
+  const heatLine = `
+      <line class="weather-chart-heat-line" x1="${pad.left}" y1="${heatLineY.toFixed(1)}" x2="${pad.left + plotW}" y2="${heatLineY.toFixed(1)}"></line>
+      <text class="weather-chart-heat-label" x="${pad.left + plotW - 2}" y="${(heatLineY - 5).toFixed(1)}" text-anchor="end">30°C</text>
+    `;
+
+  const tempDots = points
+    .map((p, i) => {
+      if (p.temp == null) return "";
+      const cx = xAt(i);
+      const cy = yTemp(p.temp);
+      const tempText = Number.isInteger(p.temp) ? String(p.temp) : p.temp.toFixed(1);
+      return `
+        <circle class="weather-chart-temp-dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4"></circle>
+        <circle class="weather-chart-temp-hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="11"
+          data-temp="${escapeHtml(tempText)}" data-time="${escapeHtml(p.time)}" data-weather="${escapeHtml(p.weather)}"
+          data-x="${cx.toFixed(1)}" data-y="${cy.toFixed(1)}"></circle>`;
+    })
+    .join("");
+
+  const gameStartIdx = points.findIndex((p) => p.isGameStart);
+  const gameStartLine =
+    gameStartIdx >= 0
+      ? `<line class="weather-chart-game-line" x1="${xAt(gameStartIdx).toFixed(1)}" y1="${pad.top}" x2="${xAt(gameStartIdx).toFixed(1)}" y2="${pad.top + plotH}"></line>
+         <text class="weather-chart-game-label" x="${xAt(gameStartIdx).toFixed(1)}" y="${pad.top - 8}" text-anchor="middle">경기시작</text>`
+      : "";
+
+  const labelStep = n > 16 ? 3 : n > 10 ? 2 : 1;
+  const xLabels = points
+    .map((p, i) => {
+      if (i % labelStep !== 0 && i !== n - 1 && !p.isGameStart) return "";
+      return `<text class="weather-chart-xlabel" x="${xAt(i).toFixed(1)}" y="${(height - 28).toFixed(1)}" text-anchor="middle">${escapeHtml(p.time)}</text>
+        <text class="weather-chart-xicon" x="${xAt(i).toFixed(1)}" y="${(height - 8).toFixed(1)}" text-anchor="middle">${p.icon}</text>`;
+    })
+    .join("");
+
+  const tempTicks = [yTempMin, 30, yTempMax].filter(
+    (v, idx, arr) => arr.indexOf(v) === idx && v >= yTempMin && v <= yTempMax
+  );
+  const tempAxis = tempTicks
+    .map(
+      (v) =>
+        `<text class="weather-chart-ylabel weather-chart-ylabel--temp${v === 30 ? " weather-chart-ylabel--heat" : ""}" x="${pad.left - 8}" y="${yTemp(v).toFixed(1)}" text-anchor="end" dominant-baseline="middle">${v}°</text>`
+    )
+    .join("");
+  const rainAxis = [0, 50, 100]
+    .map(
+      (v) =>
+        `<text class="weather-chart-ylabel weather-chart-ylabel--rain" x="${width - pad.right + 8}" y="${yRain(v).toFixed(1)}" text-anchor="start" dominant-baseline="middle">${v}%</text>`
+    )
+    .join("");
+
+  return `
+    <div class="weather-chart-wrap">
+      <div class="weather-chart-head">
+        <span class="weather-chart-date">${escapeHtml(dateLabel)}</span>
+        <div class="weather-chart-legend">
+          <span class="weather-chart-legend-item weather-chart-legend-item--temp">기온</span>
+          <span class="weather-chart-legend-item weather-chart-legend-item--rain">강수확률</span>
+          <span class="weather-chart-legend-item weather-chart-legend-item--heat">30°C 기준</span>
+        </div>
+      </div>
+      <div class="weather-chart-canvas">
+        <svg class="weather-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="시간대별 기온·강수확률 그래프">
+          <rect class="weather-chart-bg" x="${pad.left}" y="${pad.top}" width="${plotW}" height="${plotH}" rx="6"></rect>
+          <line class="weather-chart-grid" x1="${pad.left}" y1="${yRain(50).toFixed(1)}" x2="${pad.left + plotW}" y2="${yRain(50).toFixed(1)}"></line>
+          ${rainBars}
+          ${heatLine}
+          ${gameStartLine}
+          ${tempPath ? `<path class="weather-chart-temp-line" d="${tempPath}" fill="none"></path>` : ""}
+          ${tempDots}
+          ${tempAxis}
+          ${rainAxis}
+          ${xLabels}
+        </svg>
+        <div class="weather-chart-tip" hidden></div>
+      </div>
+      <p class="weather-chart-hint">기온 점을 클릭하면 해당 시각 기온이 표시됩니다.</p>
+    </div>
+  `;
+};
+
 const renderWeatherSection = (g) => {
   const weather = g?.weather_info;
   if (!weather || !Array.isArray(weather.hourly) || weather.hourly.length === 0) return "";
@@ -432,27 +789,6 @@ const renderWeatherSection = (g) => {
     return "날짜";
   })();
 
-  const dateCard = `
-      <article class="weather-hour-item weather-hour-item-date">
-        <div class="weather-time-row">
-          <span class="weather-time">날짜</span>
-        </div>
-        <div class="weather-date-value">${weatherDateLabel}</div>
-      </article>
-    `;
-
-  const hourlyItems = weather.hourly.map((item) => `
-      <article class="weather-hour-item${item.is_game_start ? " weather-hour-item-game-start" : ""}">
-        <div class="weather-time-row">
-          <span class="weather-time">${item.time_label || "-"}</span>
-        </div>
-        <div class="weather-icon">${WEATHER_ICON_MAP[item.icon] || "🌤️"}</div>
-        <div class="weather-desc">${item.weather || "-"}</div>
-        <div class="weather-pop">강수 ${item.rain_probability ?? "-"}%</div>
-        <div class="weather-temp">${item.temperature && item.temperature !== "-" ? `${item.temperature}°C` : "-"}</div>
-      </article>
-    `).join("");
-
   return `
     <section class="weather-section">
       <h2 class="cmp-title">경기장 날씨</h2>
@@ -473,12 +809,8 @@ const renderWeatherSection = (g) => {
         </div>
       </div>
       ${renderShadeSunMarkup()}
-      <div class="weather-hourly-wrap">
-        <div class="weather-hourly-grid">
-          ${dateCard}
-          ${hourlyItems}
-        </div>
-      </div>
+      ${renderWeatherHourlyChart(weather.hourly, weatherDateLabel)}
+      ${renderWeatherCancelWarnings(weather)}
     </section>
   `;
 };
@@ -1015,6 +1347,8 @@ const renderRegisterMoveSection = (g) => {
   const moveDate = String(effective.date || "").trim();
   const regList = Array.isArray(effective.registered) ? effective.registered : [];
   const deregList = Array.isArray(effective.deregistered) ? effective.deregistered : [];
+  // 등록·말소 모두 비어 있으면 섹션 자체를 숨긴다.
+  if (!regList.length && !deregList.length) return "";
   const toRows = (rows) => rows.map((item) => `
       <tr>
         <td>${item.number || "-"}</td>
@@ -1029,6 +1363,7 @@ const renderRegisterMoveSection = (g) => {
     <section class="move-section">
       <h2 class="cmp-title">한화 등/말소 현황</h2>
       <div class="move-date">기준 날짜: ${moveDate || "-"}</div>
+      ${regList.length ? `
       <div class="lineup-pitcher-title">등록</div>
       <div class="lineup-table-wrap">
         <table class="lineup-table">
@@ -1042,10 +1377,11 @@ const renderRegisterMoveSection = (g) => {
             </tr>
           </thead>
           <tbody>
-            ${toRows(regList) || `<tr><td colspan="5" class="lineup-empty">당일 등록된 선수가 없습니다.</td></tr>`}
+            ${toRows(regList)}
           </tbody>
         </table>
-      </div>
+      </div>` : ""}
+      ${deregList.length ? `
       <div class="lineup-pitcher-title">말소</div>
       <div class="lineup-table-wrap">
         <table class="lineup-table">
@@ -1059,10 +1395,10 @@ const renderRegisterMoveSection = (g) => {
             </tr>
           </thead>
           <tbody>
-            ${toRows(deregList) || `<tr><td colspan="5" class="lineup-empty">당일 말소된 선수가 없습니다.</td></tr>`}
+            ${toRows(deregList)}
           </tbody>
         </table>
-      </div>
+      </div>` : ""}
     </section>
   `;
 };
@@ -1256,19 +1592,30 @@ const formatLeagueResultLabel = (row) => {
   return res;
 };
 
+const isMissingStarterName = (name) => {
+  const token = String(name || "").trim();
+  return !token || token === "-" || token === "미정" || token === "TBD" || token === "예정";
+};
+
 const renderLeagueResultsSection = (g) => {
   const raw = Array.isArray(g?.league_results_games)
     ? g.league_results_games
     : Array.isArray(g?.yesterday_league_games)
       ? g.yesterday_league_games
       : [];
-  if (raw.length === 0) return "";
+  // 실제 경기 결과(승/무/진행중)가 하나도 없으면 섹션 자체를 숨긴다. (취소만 있는 날 포함)
+  const gamesWithResults = raw.filter((row) => {
+    const res = String(row?.result || "").trim();
+    return Boolean(res) && res !== "취소";
+  });
+  if (gamesWithResults.length === 0) return "";
   const ymd = g.league_results_date || g.yesterday_league_date || "";
   const dt = parseYmdAsLocalDate(ymd);
   const titleDate = dt
     ? `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`
     : ymd;
   const sid = String(g?.season_id || "").trim();
+  // 같은 날짜에 실경기가 있으면 취소 카드도 함께 보여 준다.
   const games = [...raw].sort((a, b) => {
     const aH = a.away_team_id === "HH" || a.home_team_id === "HH" ? 0 : 1;
     const bH = b.away_team_id === "HH" || b.home_team_id === "HH" ? 0 : 1;
@@ -1335,6 +1682,12 @@ const renderLeagueResultsSection = (g) => {
 
 const renderLeagueProbableSection = (g) => {
   const raw = Array.isArray(g?.league_probable_games) ? g.league_probable_games : [];
+  // 타 구장 선발 일정이 없으면(한화 경기만 남는 경우) 상단 선발 카드와 중복이므로 숨긴다.
+  const otherGames = raw.filter(
+    (row) =>
+      !(isMissingStarterName(row?.away_starter) && isMissingStarterName(row?.home_starter))
+  );
+  if (otherGames.length === 0) return "";
   const hanwhaRow = {
     game_time: g?.game_time || "",
     stadium: g?.stadium || "",
@@ -1345,13 +1698,17 @@ const renderLeagueProbableSection = (g) => {
     away_starter: g?.away_starter || "미정",
     home_starter: g?.home_starter || "미정",
   };
-  const games = [hanwhaRow, ...raw];
+  const games = [hanwhaRow, ...otherGames];
   const deduped = [];
   const seen = new Set();
   for (const row of games) {
     const key = `${row.away_team || ""}|${row.home_team || ""}|${row.game_time || ""}|${row.stadium || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    // 양 선발 모두 미정이면 카드로 띄우지 않는다.
+    if (isMissingStarterName(row.away_starter) && isMissingStarterName(row.home_starter)) {
+      continue;
+    }
     deduped.push(row);
   }
   if (deduped.length === 0) return "";
@@ -1447,6 +1804,7 @@ const renderGame = (g, refreshedAt) => {
   `;
   bindScheduleCalendarEvents();
   bindSunShadowEvents();
+  bindWeatherChartEvents();
 };
 
 const shouldStartPolling = (g) => {
