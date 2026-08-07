@@ -947,6 +947,7 @@ html[data-theme="dark"] .weather-chart-tip::after {
 .eagles-tv-section,
 .news-section,
 .weather-section,
+.playoff-race-section,
 .rank-section,
 .yesterday-league-section {
   margin-top: 24px;
@@ -1262,6 +1263,92 @@ html[data-theme="dark"] .weather-chart-tip::after {
 .share-note a {
   color: var(--hes-link);
   word-break: break-all;
+}
+
+.playoff-race-lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--hes-text-muted);
+}
+
+.playoff-race-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.playoff-race-card {
+  border: 1px solid var(--hes-border-strong);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--hes-bg-elevated);
+  min-height: 140px;
+}
+
+.playoff-race-card--magic {
+  border-color: #ffb347;
+  background: #fff8f0;
+}
+
+.playoff-race-card--tragic {
+  border-color: #90a4ae;
+  background: #f7f9fb;
+}
+
+.playoff-race-card--wins {
+  border-color: #ff8a65;
+  background: #fff5f2;
+}
+
+.playoff-race-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hes-text-muted);
+}
+
+.playoff-race-value {
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--hes-text);
+  word-break: keep-all;
+}
+
+.playoff-race-desc {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--hes-text-secondary);
+}
+
+.playoff-race-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--hes-text-muted);
+}
+
+html[data-theme="dark"] .playoff-race-card--magic {
+  background: #3a2a18;
+  border-color: #ffb347;
+}
+
+html[data-theme="dark"] .playoff-race-card--tragic {
+  background: #243038;
+  border-color: #78909c;
+}
+
+html[data-theme="dark"] .playoff-race-card--wins {
+  background: #3a221c;
+  border-color: #ff8a65;
+}
+
+@media (max-width: 720px) {
+  .playoff-race-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .rank-table-wrap {

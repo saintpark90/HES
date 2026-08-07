@@ -901,6 +901,228 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead, g) => {
     `;
   };
 
+const PLAYOFF_SPOTS = 5;
+
+/** 한글 받침 여부. 영문 구단 약칭은 실제 호칭 기준으로 보정한다. */
+const TEAM_NAME_BATCHIM = {
+  KIA: false, // 기아
+  KT: false, // 케이티
+  LG: false, // 엘지
+  NC: false, // 엔씨
+  SSG: false, // 에스에스지
+  SK: false,
+  한화: false,
+  삼성: true,
+  두산: true,
+  롯데: false,
+  키움: true,
+};
+
+const hasBatchim = (word) => {
+  const token = String(word || "").trim();
+  if (!token) return false;
+  if (Object.prototype.hasOwnProperty.call(TEAM_NAME_BATCHIM, token)) {
+    return TEAM_NAME_BATCHIM[token];
+  }
+  const ch = token[token.length - 1];
+  const code = ch.charCodeAt(0);
+  if (code >= 0xac00 && code <= 0xd7a3) {
+    return (code - 0xac00) % 28 !== 0;
+  }
+  // 영문/숫자 등은 모음처럼 끝나는 경우로 본다.
+  return false;
+};
+
+const josaGa = (word) => `${word}${hasBatchim(word) ? "이" : "가"}`;
+const josaUl = (word) => `${word}${hasBatchim(word) ? "을" : "를"}`;
+
+const parseRankInt = (value) => {
+  const n = Number.parseInt(String(value ?? "").replace(/[^\d-]/g, ""), 10);
+  return Number.isFinite(n) ? n : null;
+};
+
+const countHanwhaRemainingGames = (schedule) => {
+  const rows = Array.isArray(schedule) ? schedule : [];
+  return rows.filter((row) => {
+    if (!row || row.is_final || row.is_live) return false;
+    if (row.result === "취소") return false;
+    if (String(row.cancel_label || "").trim()) return false;
+    return true;
+  }).length;
+};
+
+const buildPlayoffRaceSummary = (g) => {
+  const rankings = Array.isArray(g?.team_rankings) ? g.team_rankings : [];
+  if (rankings.length < PLAYOFF_SPOTS + 1) return null;
+
+  const remainingHH = countHanwhaRemainingGames(g?.season_schedule);
+  const hhRaw =
+    rankings.find((row) => row?.team_id === "HH" || String(row?.team_name || "").includes("한화")) ||
+    null;
+  if (!hhRaw) return null;
+
+  const hhGames = parseRankInt(hhRaw.games) ?? 0;
+  const impliedSeasonGames = hhGames + remainingHH;
+  if (impliedSeasonGames <= 0) return null;
+
+  const teams = rankings
+    .map((row) => {
+      const wins = parseRankInt(row.wins) ?? 0;
+      const losses = parseRankInt(row.losses) ?? 0;
+      const games = parseRankInt(row.games) ?? 0;
+      const rank = parseRankInt(row.rank);
+      const remaining = Math.max(0, impliedSeasonGames - games);
+      return {
+        team_id: String(row.team_id || ""),
+        team_name: String(row.team_name || ""),
+        rank,
+        wins,
+        losses,
+        games,
+        remaining,
+        maxWins: wins + remaining,
+      };
+    })
+    .filter((row) => row.rank != null)
+    .sort((a, b) => a.rank - b.rank);
+
+  const hh = teams.find((row) => row.team_id === "HH" || row.team_name.includes("한화"));
+  if (!hh) return null;
+
+  const cutTeam = teams.find((row) => row.rank === PLAYOFF_SPOTS) || teams[PLAYOFF_SPOTS - 1];
+  const sixth = teams.find((row) => row.rank === PLAYOFF_SPOTS + 1) || teams[PLAYOFF_SPOTS];
+  if (!cutTeam) return null;
+
+  const magicOver = (target) => {
+    if (!target) return null;
+    return target.wins + target.remaining - hh.wins + 1;
+  };
+
+  // 매직: 진출권 안이면 6위 이하 전체, 밖이어도 현재 5위를 상대로 억지로 계산
+  // + 5위 전패/전승 시 필요 승수를 함께 안내
+  let magicNumber = 0;
+  let magicLabel = "";
+  const winsNeededBest = Math.max(0, cutTeam.wins - hh.wins + 1); // 5위 전패
+  const winsNeededWorst = Math.max(0, cutTeam.maxWins - hh.wins + 1); // 5위 전승
+  const bestText =
+    winsNeededBest === 0
+      ? "이미 5위 승수 이상"
+      : winsNeededBest > hh.remaining
+        ? `${winsNeededBest}승 필요(잔여 ${hh.remaining}경기라 부족)`
+        : `${winsNeededBest}승 필요`;
+  const worstText =
+    winsNeededWorst === 0
+      ? "이미 5위 최대 승수 이상"
+      : winsNeededWorst > hh.remaining
+        ? `${winsNeededWorst}승 필요(잔여 ${hh.remaining}경기라 자력 확정 어려움)`
+        : `${winsNeededWorst}승 필요`;
+  const winsScenarioText =
+    hh.rank <= PLAYOFF_SPOTS
+      ? `현재 ${hh.rank}위로 가을야구 진출권 안에 있습니다.`
+      : `5위 ${cutTeam.team_name} 기준 필요 승수 — 전패 시: ${bestText}, 전승 시: ${worstText}.`;
+
+  if (hh.rank <= PLAYOFF_SPOTS) {
+    const threats = teams.filter((row) => row.rank > PLAYOFF_SPOTS);
+    const values = threats.map((row) => magicOver(row)).filter((v) => v != null);
+    magicNumber = values.length ? Math.max(0, ...values) : 0;
+    magicLabel =
+      magicNumber <= 0
+        ? `가을야구 진출이 사실상 확정된 상태입니다. ${winsScenarioText}`
+        : `한화가 ${magicNumber}승 더 하거나, 추격 팀이 ${magicNumber}패 더 하면(합쳐서 ${magicNumber}번) 가을야구 진출이 확정됩니다. ${winsScenarioText}`;
+  } else {
+    magicNumber = Math.max(0, magicOver(cutTeam) ?? 0);
+    magicLabel =
+      magicNumber <= 0
+        ? `현재 5위 ${josaUl(cutTeam.team_name)} 상대로는 이미 매직넘버가 소멸된 상태입니다. ${winsScenarioText}`
+        : `현재 5위 ${cutTeam.team_name} 기준으로 계산하면, 한화가 ${magicNumber}승 더 하거나 5위 ${josaGa(cutTeam.team_name)} ${magicNumber}패 더 하면(합쳐서 ${magicNumber}번) 가을야구 진출이 확정됩니다. ${winsScenarioText}`;
+  }
+
+  // 트래직: 탈락까지 남은 패수(한화 패 또는 5위/추격팀 승)
+  let tragicNumber = hh.wins + hh.remaining - cutTeam.wins + 1;
+  let tragicLabel = "";
+  if (hh.rank <= PLAYOFF_SPOTS) {
+    tragicNumber = sixth ? hh.wins + hh.remaining - sixth.wins + 1 : tragicNumber;
+    tragicLabel =
+      tragicNumber <= 0
+        ? "이미 하위 팀에게 순위를 내줄 수 있는 임계점에 가깝습니다."
+        : `한화가 ${tragicNumber}패 더 하거나, 바로 아래 추격 팀이 ${tragicNumber}승 더 하면 가을야구권에서 밀려날 수 있습니다.`;
+  } else if (tragicNumber <= 0) {
+    tragicLabel = "잔여 경기를 모두 이겨도 현재 5위 승수를 넘기기 어려워 진출이 사실상 어려운 상황입니다.";
+  } else {
+    tragicLabel = `한화가 ${tragicNumber}패 더 하거나, 현재 5위 ${josaGa(cutTeam.team_name)} ${tragicNumber}승 더 하면 가을야구 탈락이 확정됩니다.`;
+  }
+  tragicNumber = Math.max(0, tragicNumber);
+
+  const gbToCut = (() => {
+    if (hh.rank <= PLAYOFF_SPOTS) return null;
+    const hhGb = Number.parseFloat(String(hhRaw.games_behind ?? "").replace(/[^\d.-]/g, ""));
+    const cutRaw = rankings.find((row) => parseRankInt(row.rank) === PLAYOFF_SPOTS);
+    const cutGb = Number.parseFloat(String(cutRaw?.games_behind ?? "").replace(/[^\d.-]/g, ""));
+    if (Number.isFinite(hhGb) && Number.isFinite(cutGb)) {
+      return Math.max(0, Number((hhGb - cutGb).toFixed(1)));
+    }
+    if (Number.isFinite(hhGb)) return hhGb;
+    return null;
+  })();
+
+  return {
+    rank: hh.rank,
+    wins: hh.wins,
+    losses: hh.losses,
+    remaining: hh.remaining,
+    impliedSeasonGames,
+    cutTeamName: cutTeam.team_name,
+    cutWins: cutTeam.wins,
+    magicNumber,
+    magicLabel,
+    tragicNumber,
+    tragicLabel,
+    gamesBehindToCut: gbToCut,
+    inPlayoffSpot: hh.rank <= PLAYOFF_SPOTS,
+  };
+};
+
+const renderPlayoffRaceSection = (g) => {
+  const summary = buildPlayoffRaceSummary(g);
+  if (!summary) return "";
+
+  const magicValue =
+    summary.magicNumber <= 0 ? "확정" : String(summary.magicNumber);
+  const tragicValue =
+    summary.tragicNumber <= 0 && !summary.inPlayoffSpot
+      ? "위험"
+      : `${summary.tragicNumber}패`;
+
+  return `
+    <section class="playoff-race-section">
+      <h2 class="cmp-title">가을야구 전망</h2>
+      <p class="playoff-race-lead">
+        한화는 현재 <strong>${summary.rank}위</strong> · ${summary.wins}승 ${summary.losses}패,
+        남은 일정 <strong>${summary.remaining}경기</strong>
+        ${summary.gamesBehindToCut != null ? `(5위와 ${summary.gamesBehindToCut}게임차)` : ""}
+        기준입니다. 포스트시즌은 <strong>5위까지</strong> 진출합니다.
+      </p>
+      <div class="playoff-race-grid">
+        <article class="playoff-race-card playoff-race-card--magic">
+          <div class="playoff-race-kicker">매직 넘버</div>
+          <div class="playoff-race-value">${escapeHtml(magicValue)}</div>
+          <p class="playoff-race-desc">${escapeHtml(summary.magicLabel)}</p>
+        </article>
+        <article class="playoff-race-card playoff-race-card--tragic">
+          <div class="playoff-race-kicker">트래직 넘버</div>
+          <div class="playoff-race-value">${escapeHtml(tragicValue)}</div>
+          <p class="playoff-race-desc">${escapeHtml(summary.tragicLabel)}</p>
+        </article>
+      </div>
+      <p class="playoff-race-note">
+        ※ 잔여 경기는 한화 시즌 일정 기준으로 추정했고, 타 구단 잔여 경기는 소화 경기 수 차이로 보정합니다.
+        무승부·직접 대결·추후 편성되는 경기에 따라 숫자가 달라질 수 있습니다.
+        순위·일정이 갱신될 때마다 자동으로 다시 계산됩니다.
+      </p>
+    </section>
+  `;
+};
+
 const renderTeamRankings = (rankings, rankDate) => {
   if (!Array.isArray(rankings) || rankings.length === 0) return "";
     const rows = rankings.map((row) => {
@@ -1797,6 +2019,7 @@ const renderGame = (g, refreshedAt) => {
     ${renderLeagueResultsSection(g)}
     ${renderLineupSection(g)}
     ${renderRegisterMoveSection(g)}
+    ${renderPlayoffRaceSection(g)}
     ${renderSeriesSection(g)}
     ${renderEaglesTvSection(g)}
     ${renderLatestNewsSection(g)}
