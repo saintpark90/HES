@@ -651,8 +651,8 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
   }
 
   const width = 640;
-  const height = 270;
-  const pad = { top: 28, right: 44, bottom: 58, left: 40 };
+  const height = 300;
+  const pad = { top: 36, right: 62, bottom: 78, left: 56 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const n = points.length;
@@ -694,8 +694,10 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
       const cx = xAt(i);
       const cy = yTemp(p.temp);
       const tempText = Number.isInteger(p.temp) ? String(p.temp) : p.temp.toFixed(1);
+      const labelY = cy - pad.top < 18 ? cy + 18 : cy - 12;
       return `
         <circle class="weather-chart-temp-dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4"></circle>
+        <text class="weather-chart-temp-num" x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(tempText)}</text>
         <circle class="weather-chart-temp-hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="11"
           data-temp="${escapeHtml(tempText)}" data-time="${escapeHtml(p.time)}" data-weather="${escapeHtml(p.weather)}"
           data-x="${cx.toFixed(1)}" data-y="${cy.toFixed(1)}"></circle>`;
@@ -713,8 +715,8 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
   const xLabels = points
     .map((p, i) => {
       if (i % labelStep !== 0 && i !== n - 1 && !p.isGameStart) return "";
-      return `<text class="weather-chart-xlabel" x="${xAt(i).toFixed(1)}" y="${(height - 28).toFixed(1)}" text-anchor="middle">${escapeHtml(p.time)}</text>
-        <text class="weather-chart-xicon" x="${xAt(i).toFixed(1)}" y="${(height - 8).toFixed(1)}" text-anchor="middle">${p.icon}</text>`;
+      return `<text class="weather-chart-xlabel" x="${xAt(i).toFixed(1)}" y="${(height - 40).toFixed(1)}" text-anchor="middle">${escapeHtml(p.time)}</text>
+        <text class="weather-chart-xicon" x="${xAt(i).toFixed(1)}" y="${(height - 12).toFixed(1)}" text-anchor="middle">${p.icon}</text>`;
     })
     .join("");
 
