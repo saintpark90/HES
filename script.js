@@ -695,9 +695,14 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
       const cy = yTemp(p.temp);
       const tempText = Number.isInteger(p.temp) ? String(p.temp) : p.temp.toFixed(1);
       const labelY = cy - pad.top < 18 ? cy + 18 : cy - 12;
+      // 온도 숫자는 경기시작 시각에만 표기 (나머지 시각은 점·클릭 팁만)
+      const tempNum =
+        p.isGameStart
+          ? `<text class="weather-chart-temp-num" x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(tempText)}</text>`
+          : "";
       return `
         <circle class="weather-chart-temp-dot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.4"></circle>
-        <text class="weather-chart-temp-num" x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(tempText)}</text>
+        ${tempNum}
         <circle class="weather-chart-temp-hit" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="11"
           data-temp="${escapeHtml(tempText)}" data-time="${escapeHtml(p.time)}" data-weather="${escapeHtml(p.weather)}"
           data-x="${cx.toFixed(1)}" data-y="${cy.toFixed(1)}"></circle>`;
@@ -761,7 +766,7 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
         </svg>
         <div class="weather-chart-tip" hidden></div>
       </div>
-      <p class="weather-chart-hint">기온 점을 클릭하면 해당 시각 기온이 표시됩니다.</p>
+      <p class="weather-chart-hint">경기시작 시각 기온만 숫자로 표시됩니다. 다른 시각은 점을 클릭하면 기온을 볼 수 있습니다.</p>
     </div>
   `;
 };
@@ -904,6 +909,8 @@ const renderTeamComparison = (tc, awayName, homeName, headToHead, g) => {
   };
 
 const PLAYOFF_SPOTS = 5;
+/** KBO 정규시즌 경기 수 (팀당). 잔여·매직/트래직 계산의 기준. */
+const SEASON_GAMES = 144;
 
 /** 한글 받침 여부. 영문 구단 약칭은 실제 호칭 기준으로 보정한다. */
 const TEAM_NAME_BATCHIM = {
@@ -953,19 +960,47 @@ const countHanwhaRemainingGames = (schedule) => {
   }).length;
 };
 
+/**
+ * 매직넘버 M: 우리 승 또는 상대 패가 합쳐 M번 나오면 확정.
+ * 자력 매직은 잔여 경기 수를 넘을 수 없음(M > 잔여면 상대 패배가 필수).
+ */
+const describeMagicPath = (magic, ourRem, theirRem, rivalName) => {
+  if (magic <= 0) return "이미 매직넘버가 소멸된 상태입니다.";
+  if (magic <= ourRem) {
+    return `남은 ${ourRem}경기 중 한화가 ${magic}승 하면 상대 결과와 무관하게 확정됩니다. (한화 ${magic}승 또는 ${rivalName} ${magic}패가 합쳐 ${magic}번)`;
+  }
+  const needRivalLosses = magic - ourRem;
+  if (needRivalLosses > theirRem) {
+    return `남은 ${ourRem}경기와 ${rivalName} 잔여 ${theirRem}경기를 모두 반영해도 확정이 불가능합니다.`;
+  }
+  return `남은 ${ourRem}경기 전승이 필요하고, ${josaGa(rivalName)} 남은 경기에서 ${needRivalLosses}패 이상이어야 확정됩니다. (한화 승+상대 패 합계 ${magic}번)`;
+};
+
+/** 트래직넘버 T: 우리 패 또는 상대 승이 합쳐 T번 나오면 탈락. */
+const describeTragicPath = (tragic, ourRem, rivalName) => {
+  if (tragic <= 0) {
+    return `남은 ${ourRem}경기를 모두 이겨도 현재 ${rivalName} 승수를 넘기기 어려워 진출 가능성이 없습니다.`;
+  }
+  if (tragic > ourRem) {
+    return `남은 ${ourRem}경기 전패만으로는 탈락하지 않지만, ${josaGa(rivalName)} ${tragic}승을 추가하거나 한화 패·상대 승이 합쳐 ${tragic}번 나오면 탈락이 확정됩니다.`;
+  }
+  return `남은 ${ourRem}경기 중 한화가 ${tragic}패를 더 하거나, ${josaGa(rivalName)} ${tragic}승을 추가하면(합쳐서 ${tragic}번) 탈락이 확정됩니다.`;
+};
+
 const buildPlayoffRaceSummary = (g) => {
   const rankings = Array.isArray(g?.team_rankings) ? g.team_rankings : [];
   if (rankings.length < PLAYOFF_SPOTS + 1) return null;
 
-  const remainingHH = countHanwhaRemainingGames(g?.season_schedule);
   const hhRaw =
     rankings.find((row) => row?.team_id === "HH" || String(row?.team_name || "").includes("한화")) ||
     null;
   if (!hhRaw) return null;
 
   const hhGames = parseRankInt(hhRaw.games) ?? 0;
-  const impliedSeasonGames = hhGames + remainingHH;
-  if (impliedSeasonGames <= 0) return null;
+  if (hhGames < 0) return null;
+
+  // 일정 잔여 수는 참고용. 계산 기준은 시즌 144경기.
+  const scheduleRemaining = countHanwhaRemainingGames(g?.season_schedule);
 
   const teams = rankings
     .map((row) => {
@@ -973,7 +1008,7 @@ const buildPlayoffRaceSummary = (g) => {
       const losses = parseRankInt(row.losses) ?? 0;
       const games = parseRankInt(row.games) ?? 0;
       const rank = parseRankInt(row.rank);
-      const remaining = Math.max(0, impliedSeasonGames - games);
+      const remaining = Math.max(0, SEASON_GAMES - games);
       return {
         team_id: String(row.team_id || ""),
         team_name: String(row.team_name || ""),
@@ -995,65 +1030,96 @@ const buildPlayoffRaceSummary = (g) => {
   const sixth = teams.find((row) => row.rank === PLAYOFF_SPOTS + 1) || teams[PLAYOFF_SPOTS];
   if (!cutTeam) return null;
 
+  // MN = G+1 - W_us - L_them ≡ them.maxWins - us.wins + 1 (무승부 반영)
   const magicOver = (target) => {
     if (!target) return null;
     return target.wins + target.remaining - hh.wins + 1;
   };
+  // EN = us.maxWins - them.wins + 1
+  const tragicOver = (target) => {
+    if (!target) return null;
+    return hh.wins + hh.remaining - target.wins + 1;
+  };
 
-  // 매직: 진출권 안이면 6위 이하 전체, 밖이어도 현재 5위를 상대로 억지로 계산
-  // + 5위 전패/전승 시 필요 승수를 함께 안내
-  let magicNumber = 0;
+  // 5개 팀이 이미 한화 최대 승수보다 많으면 수학적으로 진출 불가
+  const teamsLockedAhead = teams.filter((row) => row.team_id !== hh.team_id && row.wins > hh.maxWins).length;
+  const canCatchCut = hh.maxWins >= cutTeam.wins;
+  const playoffPossible = canCatchCut && teamsLockedAhead < PLAYOFF_SPOTS;
+
+  let magicNumber = null; // null → 화면에서 "없음"
   let magicLabel = "";
-  const winsNeededBest = Math.max(0, cutTeam.wins - hh.wins + 1); // 5위 전패
-  const winsNeededWorst = Math.max(0, cutTeam.maxWins - hh.wins + 1); // 5위 전승
-  const bestText =
-    winsNeededBest === 0
-      ? "이미 5위 승수 이상"
-      : winsNeededBest > hh.remaining
-        ? `${winsNeededBest}승 필요(잔여 ${hh.remaining}경기라 부족)`
-        : `${winsNeededBest}승 필요`;
-  const worstText =
-    winsNeededWorst === 0
-      ? "이미 5위 최대 승수 이상"
-      : winsNeededWorst > hh.remaining
-        ? `${winsNeededWorst}승 필요(잔여 ${hh.remaining}경기라 자력 확정 어려움)`
-        : `${winsNeededWorst}승 필요`;
-  const winsScenarioText =
-    hh.rank <= PLAYOFF_SPOTS
-      ? `현재 ${hh.rank}위로 가을야구 진출권 안에 있습니다.`
-      : `5위 ${cutTeam.team_name} 기준 필요 승수 — 전패 시: ${bestText}, 전승 시: ${worstText}.`;
-
-  if (hh.rank <= PLAYOFF_SPOTS) {
-    const threats = teams.filter((row) => row.rank > PLAYOFF_SPOTS);
-    const values = threats.map((row) => magicOver(row)).filter((v) => v != null);
-    magicNumber = values.length ? Math.max(0, ...values) : 0;
-    magicLabel =
-      magicNumber <= 0
-        ? `가을야구 진출이 사실상 확정된 상태입니다. ${winsScenarioText}`
-        : `한화가 ${magicNumber}승 더 하거나, 추격 팀이 ${magicNumber}패 더 하면(합쳐서 ${magicNumber}번) 가을야구 진출이 확정됩니다. ${winsScenarioText}`;
-  } else {
-    magicNumber = Math.max(0, magicOver(cutTeam) ?? 0);
-    magicLabel =
-      magicNumber <= 0
-        ? `현재 5위 ${josaUl(cutTeam.team_name)} 상대로는 이미 매직넘버가 소멸된 상태입니다. ${winsScenarioText}`
-        : `현재 5위 ${cutTeam.team_name} 기준으로 계산하면, 한화가 ${magicNumber}승 더 하거나 5위 ${josaGa(cutTeam.team_name)} ${magicNumber}패 더 하면(합쳐서 ${magicNumber}번) 가을야구 진출이 확정됩니다. ${winsScenarioText}`;
-  }
-
-  // 트래직: 탈락까지 남은 패수(한화 패 또는 5위/추격팀 승)
-  let tragicNumber = hh.wins + hh.remaining - cutTeam.wins + 1;
+  let tragicNumber = 0;
   let tragicLabel = "";
-  if (hh.rank <= PLAYOFF_SPOTS) {
-    tragicNumber = sixth ? hh.wins + hh.remaining - sixth.wins + 1 : tragicNumber;
+  let magicRival = cutTeam;
+  let tragicRival = cutTeam;
+
+  if (!playoffPossible) {
+    magicNumber = null;
+    magicLabel = `가을야구 진출 가능성이 없습니다. 한화 최대 승수(${hh.maxWins}승)로는 현재 5위 ${cutTeam.team_name}(${cutTeam.wins}승)을 따라잡을 수 없습니다.`;
+    tragicNumber = 0;
+    tragicLabel = describeTragicPath(0, hh.remaining, cutTeam.team_name);
+  } else if (hh.rank <= PLAYOFF_SPOTS) {
+    const threats = teams.filter((row) => row.rank > PLAYOFF_SPOTS);
+    let worstMagic = 0;
+    let worstThreat = threats[0] || sixth || cutTeam;
+    threats.forEach((row) => {
+      const m = magicOver(row);
+      if (m != null && m >= worstMagic) {
+        worstMagic = m;
+        worstThreat = row;
+      }
+    });
+    magicRival = worstThreat || cutTeam;
+    const rawMagic = Math.max(0, worstMagic);
+    // 자력 매직은 잔여 경기 이하만 숫자로 표기. 그 초과는 상대 패 필수 → 없음
+    if (rawMagic <= 0) {
+      magicNumber = 0;
+      magicLabel = `가을야구 진출이 사실상 확정된 상태입니다. 현재 ${hh.rank}위 · 남은 ${hh.remaining}경기.`;
+    } else if (rawMagic <= hh.remaining) {
+      magicNumber = rawMagic;
+      magicLabel = describeMagicPath(rawMagic, hh.remaining, magicRival.remaining, magicRival.team_name);
+    } else if (rawMagic <= hh.remaining + magicRival.remaining) {
+      magicNumber = null;
+      magicLabel = `자력 매직은 없음(필요 ${rawMagic} > 잔여 ${hh.remaining}). ${describeMagicPath(rawMagic, hh.remaining, magicRival.remaining, magicRival.team_name)}`;
+    } else {
+      magicNumber = null;
+      magicLabel = `가을야구 진출 확정이 잔여 일정만으로는 불가능합니다.`;
+    }
+
+    tragicRival = sixth || cutTeam;
+    const rawTragic = Math.max(0, tragicOver(tragicRival) ?? 0);
+    tragicNumber = rawTragic;
     tragicLabel =
-      tragicNumber <= 0
-        ? "이미 하위 팀에게 순위를 내줄 수 있는 임계점에 가깝습니다."
-        : `한화가 ${tragicNumber}패 더 하거나, 바로 아래 추격 팀이 ${tragicNumber}승 더 하면 가을야구권에서 밀려날 수 있습니다.`;
-  } else if (tragicNumber <= 0) {
-    tragicLabel = "잔여 경기를 모두 이겨도 현재 5위 승수를 넘기기 어려워 진출이 사실상 어려운 상황입니다.";
+      rawTragic <= 0
+        ? `이미 하위 팀에게 순위를 내줄 수 있는 임계점입니다. 남은 ${hh.remaining}경기.`
+        : describeTragicPath(rawTragic, hh.remaining, tragicRival.team_name);
   } else {
-    tragicLabel = `한화가 ${tragicNumber}패 더 하거나, 현재 5위 ${josaGa(cutTeam.team_name)} ${tragicNumber}승 더 하면 가을야구 탈락이 확정됩니다.`;
+    // 진출권 밖: 5위 상대로 매직/트래직
+    magicRival = cutTeam;
+    tragicRival = cutTeam;
+    const rawMagic = Math.max(0, magicOver(cutTeam) ?? 0);
+    const rawTragic = Math.max(0, tragicOver(cutTeam) ?? 0);
+
+    if (rawMagic <= 0) {
+      magicNumber = 0;
+      magicLabel = `현재 5위 ${josaUl(cutTeam.team_name)} 상대로는 이미 매직넘버가 소멸된 상태입니다. 남은 ${hh.remaining}경기.`;
+    } else if (rawMagic <= hh.remaining) {
+      magicNumber = rawMagic;
+      magicLabel = `5위 ${cutTeam.team_name} 기준 — ${describeMagicPath(rawMagic, hh.remaining, cutTeam.remaining, cutTeam.team_name)}`;
+    } else if (rawMagic <= hh.remaining + cutTeam.remaining) {
+      magicNumber = null;
+      magicLabel = `자력 매직은 없음(필요 ${rawMagic} > 잔여 ${hh.remaining}). 5위 ${cutTeam.team_name} 기준 — ${describeMagicPath(rawMagic, hh.remaining, cutTeam.remaining, cutTeam.team_name)}`;
+    } else {
+      magicNumber = null;
+      magicLabel = `가을야구 진출 가능성이 없습니다.`;
+    }
+
+    tragicNumber = rawTragic;
+    tragicLabel =
+      rawTragic <= 0
+        ? describeTragicPath(0, hh.remaining, cutTeam.team_name)
+        : describeTragicPath(rawTragic, hh.remaining, cutTeam.team_name);
   }
-  tragicNumber = Math.max(0, tragicNumber);
 
   const gbToCut = (() => {
     if (hh.rank <= PLAYOFF_SPOTS) return null;
@@ -1072,7 +1138,8 @@ const buildPlayoffRaceSummary = (g) => {
     wins: hh.wins,
     losses: hh.losses,
     remaining: hh.remaining,
-    impliedSeasonGames,
+    seasonGames: SEASON_GAMES,
+    scheduleRemaining,
     cutTeamName: cutTeam.team_name,
     cutWins: cutTeam.wins,
     magicNumber,
@@ -1081,6 +1148,7 @@ const buildPlayoffRaceSummary = (g) => {
     tragicLabel,
     gamesBehindToCut: gbToCut,
     inPlayoffSpot: hh.rank <= PLAYOFF_SPOTS,
+    playoffPossible,
   };
 };
 
@@ -1089,20 +1157,27 @@ const renderPlayoffRaceSection = (g) => {
   if (!summary) return "";
 
   const magicValue =
-    summary.magicNumber <= 0 ? "확정" : String(summary.magicNumber);
+    summary.magicNumber == null
+      ? "없음"
+      : summary.magicNumber <= 0
+        ? "확정"
+        : String(summary.magicNumber);
   const tragicValue =
-    summary.tragicNumber <= 0 && !summary.inPlayoffSpot
-      ? "위험"
-      : `${summary.tragicNumber}패`;
+    !summary.playoffPossible || (summary.tragicNumber <= 0 && !summary.inPlayoffSpot)
+      ? "없음"
+      : summary.tragicNumber <= 0
+        ? "위험"
+        : `${summary.tragicNumber}`;
 
   return `
     <section class="playoff-race-section">
       <h2 class="cmp-title">가을야구 전망</h2>
       <p class="playoff-race-lead">
         한화는 현재 <strong>${summary.rank}위</strong> · ${summary.wins}승 ${summary.losses}패,
-        남은 일정 <strong>${summary.remaining}경기</strong>
+        시즌 ${summary.seasonGames}경기 기준 남은 일정 <strong>${summary.remaining}경기</strong>
         ${summary.gamesBehindToCut != null ? `(5위와 ${summary.gamesBehindToCut}게임차)` : ""}
-        기준입니다. 포스트시즌은 <strong>5위까지</strong> 진출합니다.
+        입니다. 포스트시즌은 <strong>5위까지</strong> 진출합니다.
+        ${!summary.playoffPossible ? " <strong>현재 기준으로 가을야구 진출 가능성은 없습니다.</strong>" : ""}
       </p>
       <div class="playoff-race-grid">
         <article class="playoff-race-card playoff-race-card--magic">
@@ -1117,9 +1192,10 @@ const renderPlayoffRaceSection = (g) => {
         </article>
       </div>
       <p class="playoff-race-note">
-        ※ 잔여 경기는 한화 시즌 일정 기준으로 추정했고, 타 구단 잔여 경기는 소화 경기 수 차이로 보정합니다.
-        무승부·직접 대결·추후 편성되는 경기에 따라 숫자가 달라질 수 있습니다.
-        순위·일정이 갱신될 때마다 자동으로 다시 계산됩니다.
+        ※ 시즌 ${summary.seasonGames}경기·잔여 ${summary.remaining}경기 기준으로 계산합니다.
+        매직넘버(자력)는 잔여 경기를 넘을 수 없으며, 넘으면 「없음」으로 표기하고 상대 패배가 필요한 경로를 설명합니다.
+        트래직넘버는 한화 패 또는 기준 팀 승이 합쳐 그 횟수만큼 나오면 탈락이 확정되는 값입니다.
+        무승부·직접 대결·추후 편성에 따라 달라질 수 있습니다.
       </p>
     </section>
   `;
