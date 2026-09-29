@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 from urllib.parse import quote
@@ -30,6 +31,10 @@ NAVER_KBO_TEAM_RANK_URL = NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/se
 NAVER_KBO_LAST10_URL = (
     NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/seasons/{season}/teams/last-ten-games"
 )
+NAVER_KBO_PLAYERS_URL = NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/seasons/{season}/players"
+KBO_DEFENSE_BASIC_URL = "https://www.koreabaseball.com/Record/Player/Defense/Basic.aspx"
+KBO_HITTER_TOTAL_URL = "https://www.koreabaseball.com/Record/Player/HitterDetail/Total.aspx"
+KBO_PITCHER_TOTAL_URL = "https://www.koreabaseball.com/Record/Player/PitcherDetail/Total.aspx"
 YOUTUBE_PLAYLIST_FEED_URL = "https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
 EAGLES_HIGHLIGHT_PLAYLIST_ID = "PLH13Vc2FtHHh-syagRtonzJLl-SkG3B7Q"
 EAGLES_OIYU_PLAYLIST_ID = "PLH13Vc2FtHHg4qpO0evfriiB7R7pU_q05"
@@ -3855,6 +3860,745 @@ def _build_same_day_probable_games(target: date, hanwha_game_id: str) -> list[Di
     return rows
 
 
+# KBO가 시즌 종료 후 시상하는 개인 타이틀.
+_KBO_TITLE_SPECS = (
+    {"key": "hitterHra", "label": "타율", "kind": "hitter", "qualified": True, "higher": True, "digits": 3},
+    {"key": "hitterHit", "label": "안타", "kind": "hitter", "qualified": False, "higher": True, "digits": None},
+    {"key": "hitterHr", "label": "홈런", "kind": "hitter", "qualified": False, "higher": True, "digits": None},
+    {"key": "hitterRbi", "label": "타점", "kind": "hitter", "qualified": False, "higher": True, "digits": None},
+    {"key": "hitterRun", "label": "득점", "kind": "hitter", "qualified": False, "higher": True, "digits": None},
+    {"key": "hitterSb", "label": "도루", "kind": "hitter", "qualified": False, "higher": True, "digits": None},
+    {"key": "hitterObp", "label": "출루율", "kind": "hitter", "qualified": True, "higher": True, "digits": 3},
+    {"key": "hitterSlg", "label": "장타율", "kind": "hitter", "qualified": True, "higher": True, "digits": 3},
+    {"key": "pitcherEra", "label": "평균자책", "kind": "pitcher", "qualified": True, "higher": False, "digits": 2},
+    {"key": "pitcherWin", "label": "다승", "kind": "pitcher", "qualified": False, "higher": True, "digits": None},
+    {"key": "pitcherKk", "label": "탈삼진", "kind": "pitcher", "qualified": False, "higher": True, "digits": None},
+    {"key": "pitcherSave", "label": "세이브", "kind": "pitcher", "qualified": False, "higher": True, "digits": None},
+    {"key": "pitcherHold", "label": "홀드", "kind": "pitcher", "qualified": False, "higher": True, "digits": None},
+    {"key": "pitcherWra", "label": "승률", "kind": "pitcher", "qualified": True, "higher": True, "digits": 3},
+)
+_GG_POSITION_ORDER = ("투수", "포수", "1루수", "2루수", "3루수", "유격수", "외야수", "지명타자")
+_GG_OF_POSITIONS = {"좌익수", "중견수", "우익수", "외야수"}
+_PLAYER_HIGHLIGHT_CACHE: Dict[str, Any] = {"at": 0.0, "season": "", "data": None}
+_PLAYER_ELIGIBILITY_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _naver_sports_headers() -> Dict[str, str]:
+    return {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://m.sports.naver.com/",
+        "Origin": "https://m.sports.naver.com",
+    }
+
+
+def _is_hanwha_player_row(row: Dict[str, Any]) -> bool:
+    team_id = str(row.get("teamId") or "").strip()
+    team_name = str(row.get("teamName") or row.get("teamShortName") or "")
+    return team_id == HANWHA_TEAM_ID or "한화" in team_name
+
+
+def _dedupe_player_rows(rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    deduped: list[Dict[str, Any]] = []
+    seen = set()
+    for row in rows:
+        player_id = str(row.get("playerId") or "")
+        if not player_id or player_id in seen:
+            continue
+        seen.add(player_id)
+        deduped.append(row)
+    return deduped
+
+
+def _fetch_sorted_players(
+    season: str,
+    player_type: str,
+    sort_field: str,
+    sort_direction: str,
+    page_size: int,
+) -> list[Dict[str, Any]]:
+    try:
+        response = requests.get(
+            NAVER_KBO_PLAYERS_URL.format(season=season),
+            params={
+                "playerType": player_type,
+                "pageSize": page_size,
+                "sortField": sort_field,
+                "sortDirection": sort_direction,
+            },
+            headers=_naver_sports_headers(),
+            timeout=20,
+        )
+        response.raise_for_status()
+        batch = ((response.json().get("result") or {}).get("seasonPlayerStats") or [])
+    except Exception:
+        return []
+    if not isinstance(batch, list):
+        return []
+    return _dedupe_player_rows([row for row in batch if isinstance(row, dict)])
+
+
+def _fetch_naver_season_players(season: str, player_type: str) -> list[Dict[str, Any]]:
+    sort_field = "hitterWar" if player_type == "HITTER" else "pitcherWar"
+    return _fetch_sorted_players(season, player_type, sort_field, "desc", 500)
+
+
+def _stat_sort_value(row: Dict[str, Any], key: str, digits: Optional[int]) -> Optional[float]:
+    raw = row.get(key)
+    if raw is None:
+        return None
+    try:
+        number = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if digits is None:
+        return float(int(round(number)))
+    return round(number, digits)
+
+
+def _format_title_value(value: float, digits: Optional[int]) -> str:
+    if digits is None:
+        return str(int(value))
+    return f"{value:.{digits}f}"
+
+
+def _rank_title_leaders(
+    rows: list[Dict[str, Any]],
+    spec: Dict[str, Any],
+) -> list[tuple[int, float, Dict[str, Any]]]:
+    prepared: list[tuple[float, Dict[str, Any]]] = []
+    for row in rows:
+        if spec["qualified"] and not row.get("isQualified"):
+            continue
+        value = _stat_sort_value(row, spec["key"], spec["digits"])
+        if value is None:
+            continue
+        prepared.append((value, row))
+    prepared.sort(key=lambda item: item[0], reverse=bool(spec["higher"]))
+    ranked: list[tuple[int, float, Dict[str, Any]]] = []
+    last_value: Optional[float] = None
+    rank = 0
+    for index, (value, row) in enumerate(prepared, start=1):
+        if value != last_value:
+            rank = index
+            last_value = value
+        if rank > 5:
+            break
+        ranked.append((rank, value, row))
+    return ranked
+
+
+def _hitter_stat_summary(row: Dict[str, Any]) -> str:
+    parts: list[str] = []
+    avg = _stat_sort_value(row, "hitterHra", 3)
+    hr = _stat_sort_value(row, "hitterHr", None)
+    rbi = _stat_sort_value(row, "hitterRbi", None)
+    ops = _stat_sort_value(row, "hitterOps", 3)
+    if avg is not None:
+        parts.append(f"타율 {avg:.3f}")
+    if hr is not None:
+        parts.append(f"{int(hr)}홈런")
+    if rbi is not None:
+        parts.append(f"{int(rbi)}타점")
+    if ops is not None:
+        parts.append(f"OPS {ops:.3f}")
+    return " · ".join(parts)
+
+
+def _pitcher_stat_summary(row: Dict[str, Any]) -> str:
+    wins = _stat_sort_value(row, "pitcherWin", None)
+    losses = _stat_sort_value(row, "pitcherLose", None)
+    era = _stat_sort_value(row, "pitcherEra", 2)
+    strikeouts = _stat_sort_value(row, "pitcherKk", None)
+    innings = str(row.get("pitcherInning") or "").strip() or "-"
+    parts: list[str] = []
+    if wins is not None or losses is not None:
+        parts.append(f"{int(wins or 0)}승 {int(losses or 0)}패")
+    if era is not None:
+        parts.append(f"ERA {era:.2f}")
+    parts.append(f"{innings}이닝")
+    if strikeouts is not None:
+        parts.append(f"{int(strikeouts)}탈삼진")
+    return " · ".join(parts)
+
+
+def _parse_defense_table(html: str) -> list[Dict[str, Any]]:
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.select_one("table.tData") or soup.select_one("table")
+    parsed: list[Dict[str, Any]] = []
+    if not table:
+        return parsed
+    for tr in table.select("tr")[1:]:
+        cells = [cell.get_text(" ", strip=True) for cell in tr.find_all("td")]
+        if len(cells) < 13:
+            continue
+        link = tr.find("a", href=True)
+        href = str(link.get("href") or "") if link else ""
+        id_match = re.search(r"playerId=(\d+)", href)
+        if not id_match:
+            continue
+        gs_match = re.search(r"\d+", cells[5])
+        error_match = re.search(r"\d+", cells[7])
+        fpct = None
+        cs_pct = None
+        try:
+            fpct = float(cells[12])
+        except ValueError:
+            fpct = None
+        if len(cells) > 16 and cells[16] not in {"", "-"}:
+            try:
+                cs_pct = float(cells[16].replace("%", ""))
+            except ValueError:
+                cs_pct = None
+        parsed.append(
+            {
+                "player_id": id_match.group(1),
+                "name": cells[1],
+                "team": cells[2],
+                "position": cells[3],
+                "gs": int(gs_match.group(0)) if gs_match else 0,
+                "errors": int(error_match.group(0)) if error_match else 0,
+                "fpct": fpct,
+                "cs_pct": cs_pct,
+            }
+        )
+    return parsed
+
+
+def _kbo_asp_post(session: requests.Session, url: str, html: str, event_target: str) -> str:
+    # 기록실 폼의 VIEWSTATE가 길어 html 파서가 input을 빠뜨리면 페이지 이동이 실패한다.
+    import html as html_lib
+
+    data: Dict[str, str] = {}
+    for match in re.finditer(r"<input\b[^>]*>", html, flags=re.I):
+        tag = match.group(0)
+        type_match = re.search(r'type="([^"]*)"', tag, flags=re.I)
+        if not type_match or type_match.group(1).lower() != "hidden":
+            continue
+        name_match = re.search(r'name="([^"]+)"', tag)
+        value_match = re.search(r'value="([^"]*)"', tag)
+        if not name_match:
+            continue
+        data[name_match.group(1)] = html_lib.unescape(value_match.group(1) if value_match else "")
+    data["__EVENTTARGET"] = event_target
+    data["__EVENTARGUMENT"] = ""
+    response = session.post(
+        url,
+        data=data,
+        headers={
+            **_kbo_api_headers(),
+            "Referer": url,
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    response.encoding = "utf-8"
+    return response.text
+
+
+def _fetch_kbo_defense_rows() -> list[Dict[str, Any]]:
+    session = requests.Session()
+    headers = _kbo_api_headers()
+    try:
+        response = session.get(KBO_DEFENSE_BASIC_URL, headers=headers, timeout=20)
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        html = response.text
+    except Exception:
+        return []
+
+    rows = _parse_defense_table(html)
+    seen = {(row["player_id"], row["position"]) for row in rows}
+    current_page = 1
+    for _ in range(6):
+        soup = BeautifulSoup(html, "html.parser")
+        page_buttons = []
+        for anchor in soup.select("a"):
+            href = str(anchor.get("href") or "")
+            match = re.search(r"__doPostBack\('([^']*ucPager\$btnNo(\d+))'", href)
+            if match:
+                page_buttons.append((int(match.group(2)), match.group(1)))
+        upcoming = [item for item in page_buttons if item[0] > current_page]
+        if not upcoming:
+            break
+        upcoming.sort()
+        next_page, event_target = upcoming[0]
+        try:
+            html = _kbo_asp_post(session, KBO_DEFENSE_BASIC_URL, html, event_target)
+        except Exception:
+            break
+        page_rows = _parse_defense_table(html)
+        fresh = [row for row in page_rows if (row["player_id"], row["position"]) not in seen]
+        if not fresh:
+            break
+        rows.extend(fresh)
+        seen.update((row["player_id"], row["position"]) for row in fresh)
+        current_page = next_page
+    return rows
+
+
+def _profile_position(row: Dict[str, Any]) -> str:
+    raw = row.get("profile")
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("position") or "")
+
+
+def _gg_bucket(position: str) -> str:
+    if position in _GG_OF_POSITIONS:
+        return "외야수"
+    return position
+
+
+def _gg_score(hitter: Dict[str, Any], defense: Optional[Dict[str, Any]], bucket: str) -> float:
+    ops = _stat_sort_value(hitter, "hitterOps", 3) or 0.0
+    hr = _stat_sort_value(hitter, "hitterHr", None) or 0.0
+    score = ops * 100 + hr * 0.12
+    if not defense or bucket == "지명타자":
+        games = _stat_sort_value(hitter, "hitterGameCount", None) or 0.0
+        return score + min(games, 130) * 0.02
+    fpct = defense.get("fpct")
+    if isinstance(fpct, float):
+        score += fpct * 6
+    score -= float(defense.get("errors") or 0) * 0.35
+    score += min(int(defense.get("gs") or 0), 130) * 0.03
+    if bucket == "포수":
+        cs_pct = defense.get("cs_pct")
+        if isinstance(cs_pct, float):
+            score += (cs_pct - 25.0) * 0.65
+    return score
+
+
+def _parse_ip_value(text: str) -> float:
+    raw = str(text or "").strip()
+    match = re.match(r"^(\d+)(?:\s+(\d+)/(\d+))?$", raw)
+    if not match:
+        try:
+            return float(raw)
+        except ValueError:
+            return 0.0
+    total = float(match.group(1))
+    if match.group(2) and match.group(3):
+        denom = int(match.group(3))
+        if denom:
+            total += int(match.group(2)) / denom
+    return total
+
+
+def _parse_join_year(text: str) -> Optional[int]:
+    match = re.search(r"(\d{2,4})", text or "")
+    if not match:
+        return None
+    year = int(match.group(1))
+    if year < 100:
+        return 2000 + year if year < 80 else 1900 + year
+    return year
+
+
+def _fetch_player_eligibility(player_id: str, kind: str, season: int) -> Dict[str, Any]:
+    cache_key = f"{kind}:{player_id}"
+    cached = _PLAYER_ELIGIBILITY_CACHE.get(cache_key)
+    if cached:
+        return cached
+    url = KBO_HITTER_TOTAL_URL if kind == "hitter" else KBO_PITCHER_TOTAL_URL
+    empty = {"eligible": False, "foreign": False, "join_year": None, "prior": None}
+    try:
+        response = requests.get(
+            url,
+            params={"playerId": player_id},
+            headers=_kbo_api_headers(),
+            timeout=15,
+        )
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        soup = BeautifulSoup(response.text, "html.parser")
+    except Exception:
+        return empty
+
+    profile = soup.select_one(".player_basic")
+    profile_text = profile.get_text(" ", strip=True) if profile else ""
+    foreign = ("달러" in profile_text) or ("자유선발" in profile_text)
+    join_node = soup.find(id="cphContents_cphContents_cphContents_playerProfile_lblJoinInfo")
+    join_year = _parse_join_year(join_node.get_text(" ", strip=True) if join_node else "")
+    prior = 0.0
+    table = soup.select_one("table")
+    if table:
+        for tr in table.select("tr")[1:]:
+            cells = [cell.get_text(" ", strip=True) for cell in tr.find_all("td")]
+            if not cells or not re.fullmatch(r"\d{4}", cells[0]):
+                continue
+            year = int(cells[0])
+            if year >= season:
+                continue
+            if kind == "hitter" and len(cells) > 4:
+                pa_match = re.search(r"\d+", cells[4])
+                prior += int(pa_match.group(0)) if pa_match else 0
+            elif kind == "pitcher" and len(cells) > 12:
+                prior += _parse_ip_value(cells[12])
+
+    join_ok = join_year is not None and season - 4 <= join_year <= season
+    prior_ok = prior <= (60 if kind == "hitter" else 30)
+    result = {
+        "eligible": (not foreign) and join_ok and prior_ok,
+        "foreign": foreign,
+        "join_year": join_year,
+        "prior": prior,
+    }
+    _PLAYER_ELIGIBILITY_CACHE[cache_key] = result
+    return result
+
+
+def _build_hanwha_title_cards(season: str) -> list[Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for spec in _KBO_TITLE_SPECS:
+        player_type = "HITTER" if spec["kind"] == "hitter" else "PITCHER"
+        direction = "desc" if spec["higher"] else "asc"
+        rows = _fetch_sorted_players(season, player_type, spec["key"], direction, 30)
+        for rank, value, row in _rank_title_leaders(rows, spec):
+            if not _is_hanwha_player_row(row):
+                continue
+            player_id = str(row.get("playerId") or "")
+            if not player_id:
+                continue
+            card = grouped.get(player_id)
+            if card is None:
+                card = {
+                    "player_id": player_id,
+                    "name": str(row.get("playerName") or ""),
+                    "image_url": _face_image_url(season, player_id),
+                    "items": [],
+                    "_best": rank,
+                }
+                grouped[player_id] = card
+            card["items"].append(
+                {
+                    "label": spec["label"],
+                    "rank": rank,
+                    "value": _format_title_value(value, spec["digits"]),
+                }
+            )
+            card["_best"] = min(int(card["_best"]), rank)
+    cards = list(grouped.values())
+    for card in cards:
+        card["items"].sort(key=lambda item: (int(item["rank"]), str(item["label"])))
+    cards.sort(key=lambda card: (int(card["_best"]), str(card["name"])))
+    for card in cards:
+        card.pop("_best", None)
+    return cards
+
+
+def _build_golden_glove_awards(
+    hitters: list[Dict[str, Any]],
+    pitchers: list[Dict[str, Any]],
+    defense_rows: list[Dict[str, Any]],
+    season: str,
+) -> list[Dict[str, Any]]:
+    hitter_by_id = {str(row.get("playerId") or ""): row for row in hitters}
+    awards: list[Dict[str, Any]] = []
+
+    primary_by_player: Dict[str, Dict[str, Any]] = {}
+    for row in defense_rows:
+        current = primary_by_player.get(row["player_id"])
+        if current is None or int(row["gs"]) > int(current["gs"]):
+            primary_by_player[row["player_id"]] = row
+
+    buckets: Dict[str, list[Dict[str, Any]]] = {name: [] for name in _GG_POSITION_ORDER}
+    max_gs = max((int(row["gs"]) for row in primary_by_player.values()), default=0)
+    min_gs = max(25, int(max_gs * 0.55)) if max_gs else 25
+    used_ids = set()
+    for player_id, defense in primary_by_player.items():
+        bucket = _gg_bucket(str(defense.get("position") or ""))
+        hitter = hitter_by_id.get(player_id)
+        if bucket not in buckets or bucket == "투수" or hitter is None:
+            continue
+        if int(defense.get("gs") or 0) < min_gs:
+            continue
+        buckets[bucket].append(
+            {
+                "player_id": player_id,
+                "name": str(hitter.get("playerName") or defense.get("name") or ""),
+                "team": str(hitter.get("teamName") or defense.get("team") or ""),
+                "hanwha": _is_hanwha_player_row(hitter),
+                "image_url": _face_image_url(season, player_id),
+                "summary": "",
+                "score": _gg_score(hitter, defense, bucket),
+                "hitter": hitter,
+                "defense": defense,
+            }
+        )
+        used_ids.add(player_id)
+
+    for hitter in hitters:
+        player_id = str(hitter.get("playerId") or "")
+        if not player_id or player_id in used_ids:
+            continue
+        if "지명" not in _profile_position(hitter):
+            continue
+        games = _stat_sort_value(hitter, "hitterGameCount", None) or 0
+        if games < min_gs:
+            continue
+        buckets["지명타자"].append(
+            {
+                "player_id": player_id,
+                "name": str(hitter.get("playerName") or ""),
+                "team": str(hitter.get("teamName") or ""),
+                "hanwha": _is_hanwha_player_row(hitter),
+                "image_url": _face_image_url(season, player_id),
+                "summary": "",
+                "score": _gg_score(hitter, None, "지명타자"),
+                "hitter": hitter,
+                "defense": None,
+            }
+        )
+
+    era_rows = _fetch_sorted_players(season, "PITCHER", "pitcherEra", "asc", 40)
+    qualified_pitchers = [row for row in era_rows if row.get("isQualified")]
+    for row in qualified_pitchers:
+        era = _stat_sort_value(row, "pitcherEra", 2)
+        war = _stat_sort_value(row, "pitcherWar", 2) or 0.0
+        if era is None:
+            continue
+        player_id = str(row.get("playerId") or "")
+        buckets["투수"].append(
+            {
+                "player_id": player_id,
+                "name": str(row.get("playerName") or ""),
+                "team": str(row.get("teamName") or ""),
+                "hanwha": _is_hanwha_player_row(row),
+                "image_url": _face_image_url(season, player_id),
+                "summary": _pitcher_stat_summary(row),
+                "score": (-era * 10) + (war * 2.5),
+                "hitter": None,
+                "defense": None,
+            }
+        )
+
+    for bucket in _GG_POSITION_ORDER:
+        contenders = buckets.get(bucket) or []
+        contenders.sort(key=lambda item: float(item["score"]), reverse=True)
+        if not contenders:
+            continue
+        winner_slots = 3 if bucket == "외야수" else 1
+        last_score: Optional[float] = None
+        rank = 0
+        ranked: list[tuple[int, Dict[str, Any]]] = []
+        for index, item in enumerate(contenders, start=1):
+            score = round(float(item["score"]), 2)
+            if score != last_score:
+                rank = index
+                last_score = score
+            if rank > winner_slots:
+                break
+            ranked.append((rank, item))
+        hanwha_winners = [item for item_rank, item in ranked if item["hanwha"] and item_rank <= winner_slots]
+        if not hanwha_winners:
+            continue
+        top_context = contenders[: max(winner_slots + 2, 4)]
+        for winner in hanwha_winners:
+            rivals = []
+            for rival in top_context:
+                if rival["player_id"] == winner["player_id"]:
+                    continue
+                summary = rival["summary"]
+                if rival.get("hitter") is not None:
+                    summary = _hitter_stat_summary(rival["hitter"])
+                    defense = rival.get("defense")
+                    extras = []
+                    if defense:
+                        extras.append(f"선발 {defense['gs']}경기")
+                        if bucket == "포수" and isinstance(defense.get("cs_pct"), float):
+                            extras.append(f"도루저지 {defense['cs_pct']:.1f}%")
+                        elif isinstance(defense.get("fpct"), float) and bucket != "지명타자":
+                            extras.append(f"수비율 {defense['fpct']:.3f}")
+                    if extras:
+                        summary = " · ".join([summary, *extras])
+                rivals.append(
+                    {
+                        "name": rival["name"],
+                        "team": rival["team"],
+                        "summary": summary,
+                    }
+                )
+                if len(rivals) >= 3:
+                    break
+            summary = winner["summary"]
+            if winner.get("hitter") is not None:
+                summary = _hitter_stat_summary(winner["hitter"])
+                defense = winner.get("defense")
+                extras = []
+                if defense:
+                    extras.append(f"선발 {defense['gs']}경기")
+                    if bucket == "포수" and isinstance(defense.get("cs_pct"), float):
+                        extras.append(f"도루저지 {defense['cs_pct']:.1f}%")
+                    elif isinstance(defense.get("fpct"), float) and bucket != "지명타자":
+                        extras.append(f"수비율 {defense['fpct']:.3f}")
+                if extras:
+                    summary = " · ".join([summary, *extras])
+            awards.append(
+                {
+                    "kind": "골든글러브",
+                    "position": bucket,
+                    "player_id": winner["player_id"],
+                    "name": winner["name"],
+                    "image_url": winner["image_url"],
+                    "summary": summary,
+                    "rivals": rivals,
+                }
+            )
+    return awards
+
+
+def _build_rookie_award(
+    hitters: list[Dict[str, Any]],
+    pitchers: list[Dict[str, Any]],
+    season: str,
+) -> Optional[Dict[str, Any]]:
+    season_year = int(season)
+    pool: list[tuple[str, Dict[str, Any]]] = []
+    seen = set()
+
+    def add(kind: str, row: Dict[str, Any]) -> None:
+        player_id = str(row.get("playerId") or "")
+        if not player_id or (kind, player_id) in seen:
+            return
+        seen.add((kind, player_id))
+        pool.append((kind, row))
+
+    hitters_by_war = sorted(
+        hitters,
+        key=lambda row: _stat_sort_value(row, "hitterWar", 2) or -99,
+        reverse=True,
+    )
+    pitchers_by_war = sorted(
+        pitchers,
+        key=lambda row: _stat_sort_value(row, "pitcherWar", 2) or -99,
+        reverse=True,
+    )
+    for row in hitters_by_war:
+        war = _stat_sort_value(row, "hitterWar", 2) or 0
+        if war < 1.2:
+            break
+        add("hitter", row)
+        if sum(1 for kind, _row in pool if kind == "hitter") >= 80:
+            break
+    for row in pitchers_by_war:
+        war = _stat_sort_value(row, "pitcherWar", 2) or 0
+        if war < 1.0:
+            break
+        add("pitcher", row)
+        if sum(1 for kind, _row in pool if kind == "pitcher") >= 30:
+            break
+    for row in hitters:
+        if not _is_hanwha_player_row(row):
+            continue
+        war = _stat_sort_value(row, "hitterWar", 2) or 0
+        hr = _stat_sort_value(row, "hitterHr", None) or 0
+        if war >= 1.2 or hr >= 12:
+            add("hitter", row)
+    for row in pitchers:
+        if not _is_hanwha_player_row(row):
+            continue
+        war = _stat_sort_value(row, "pitcherWar", 2) or 0
+        wins = _stat_sort_value(row, "pitcherWin", None) or 0
+        saves = _stat_sort_value(row, "pitcherSave", None) or 0
+        if war >= 1.0 or wins >= 4 or saves >= 8:
+            add("pitcher", row)
+
+    def load(item: tuple[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        kind, row = item
+        player_id = str(row.get("playerId") or "")
+        eligibility = _fetch_player_eligibility(player_id, kind, season_year)
+        if not eligibility.get("eligible"):
+            return None
+        war_key = "hitterWar" if kind == "hitter" else "pitcherWar"
+        war = _stat_sort_value(row, war_key, 2) or 0.0
+        if war < 1.0:
+            return None
+        summary = _hitter_stat_summary(row) if kind == "hitter" else _pitcher_stat_summary(row)
+        return {
+            "player_id": player_id,
+            "name": str(row.get("playerName") or ""),
+            "team": str(row.get("teamName") or ""),
+            "hanwha": _is_hanwha_player_row(row),
+            "image_url": _face_image_url(season, player_id),
+            "summary": summary,
+            "war": war,
+        }
+
+    contenders: list[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for result in executor.map(load, pool):
+            if result:
+                contenders.append(result)
+    if not contenders:
+        return None
+    contenders.sort(key=lambda item: float(item["war"]), reverse=True)
+    leader_war = float(contenders[0]["war"])
+    leaders = [item for item in contenders if abs(float(item["war"]) - leader_war) < 0.05]
+    hanwha_leader = next((item for item in leaders if item["hanwha"]), None)
+    if hanwha_leader is None:
+        return None
+    rivals = []
+    for rival in contenders:
+        if rival["player_id"] == hanwha_leader["player_id"]:
+            continue
+        rivals.append(
+            {
+                "name": rival["name"],
+                "team": rival["team"],
+                "summary": rival["summary"],
+            }
+        )
+        if len(rivals) >= 3:
+            break
+    return {
+        "kind": "신인왕",
+        "position": "",
+        "player_id": hanwha_leader["player_id"],
+        "name": hanwha_leader["name"],
+        "image_url": hanwha_leader["image_url"],
+        "summary": hanwha_leader["summary"],
+        "rivals": rivals,
+    }
+
+
+def _fetch_hanwha_player_highlights(season_id: str) -> Optional[Dict[str, Any]]:
+    """한화 선수의 KBO 공식 타이틀 5위권, 신인왕·골든글러브 유력 후보."""
+    season = str(season_id or _today_kst().year)
+    now = time.time()
+    cached = _PLAYER_HIGHLIGHT_CACHE
+    if (
+        isinstance(cached.get("data"), dict)
+        and cached.get("season") == season
+        and now - float(cached.get("at") or 0) < 60 * 30
+    ):
+        return cached["data"]
+    try:
+        hitters = _fetch_naver_season_players(season, "HITTER")
+        pitchers = _fetch_naver_season_players(season, "PITCHER")
+        if not hitters and not pitchers:
+            return None
+        defense_rows = _fetch_kbo_defense_rows()
+        titles = _build_hanwha_title_cards(season)
+        awards = _build_golden_glove_awards(hitters, pitchers, defense_rows, season)
+        rookie = _build_rookie_award(hitters, pitchers, season)
+        if rookie:
+            awards.insert(0, rookie)
+        payload = {"titles": titles, "awards": awards}
+    except Exception:
+        return None
+    _PLAYER_HIGHLIGHT_CACHE["at"] = now
+    _PLAYER_HIGHLIGHT_CACHE["season"] = season
+    _PLAYER_HIGHLIGHT_CACHE["data"] = payload
+    return payload
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
@@ -3948,6 +4692,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
             )
             season_schedule = _get_hanwha_season_schedule_cached(season_id)
             league_probable_games = _build_same_day_probable_games(target, game_id)
+            player_highlights = _fetch_hanwha_player_highlights(season_id or str(target.year))
 
             return ensure_game_starters_from_namu(
                 {
@@ -3990,6 +4735,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "eagles_tv": eagles_tv,
                 "latest_news": latest_news,
                 "season_schedule": season_schedule,
+                "player_highlights": player_highlights,
                 "league_probable_date": target.strftime("%Y-%m-%d"),
                 "league_probable_games": league_probable_games,
                 "league_results_date": league_results_ymd,

@@ -720,8 +720,11 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
   const xLabels = points
     .map((p, i) => {
       if (i % labelStep !== 0 && i !== n - 1 && !p.isGameStart) return "";
-      return `<text class="weather-chart-xlabel" x="${xAt(i).toFixed(1)}" y="${(height - 40).toFixed(1)}" text-anchor="middle">${escapeHtml(p.time)}</text>
-        <text class="weather-chart-xicon" x="${xAt(i).toFixed(1)}" y="${(height - 12).toFixed(1)}" text-anchor="middle">${p.icon}</text>`;
+      const hour = Number.parseInt(String(p.time).split(":")[0], 10);
+      const mobileHide = Number.isFinite(hour) && hour % 2 !== 0;
+      const hideClass = mobileHide ? " weather-chart-x--mobile-hide" : "";
+      return `<text class="weather-chart-xlabel${hideClass}" x="${xAt(i).toFixed(1)}" y="${(height - 40).toFixed(1)}" text-anchor="middle">${escapeHtml(p.time)}</text>
+        <text class="weather-chart-xicon${hideClass}" x="${xAt(i).toFixed(1)}" y="${(height - 12).toFixed(1)}" text-anchor="middle">${p.icon}</text>`;
     })
     .join("");
 
@@ -1169,6 +1172,14 @@ const renderPlayoffRaceSection = (g) => {
         ? "위험"
         : `${summary.tragicNumber}`;
 
+  if (magicValue === "없음" && tragicValue === "없음") {
+    return `
+    <section class="playoff-race-section">
+      <p class="playoff-race-none">가을야구 전망은 없습니다.</p>
+    </section>
+  `;
+  }
+
   return `
     <section class="playoff-race-section">
       <h2 class="cmp-title">가을야구 전망</h2>
@@ -1249,6 +1260,86 @@ const renderTeamRankings = (rankings, rankDate) => {
       </section>
     `;
   };
+
+const renderPlayerHighlightsSection = (g) => {
+  const highlights = g?.player_highlights;
+  if (!highlights || typeof highlights !== "object") return "";
+  const titles = Array.isArray(highlights.titles) ? highlights.titles : [];
+  const awards = Array.isArray(highlights.awards) ? highlights.awards : [];
+  if (titles.length === 0 && awards.length === 0) {
+    return `
+      <section class="player-rank-section">
+        <h2 class="cmp-title">주요 선수 순위</h2>
+        <p class="player-rank-empty">이번 시즌 공식 타이틀 5위권이나 수상 유력 부문에 해당하는 한화 선수는 없습니다.</p>
+      </section>
+    `;
+  }
+
+  const titleCards = titles
+    .map((player) => {
+      const items = (Array.isArray(player?.items) ? player.items : [])
+        .map(
+          (item) =>
+            `<li><span class="player-rank-cat">${escapeHtml(item?.label || "")}</span> ${escapeHtml(String(item?.rank ?? "-"))}위 <strong>${escapeHtml(String(item?.value ?? "-"))}</strong></li>`
+        )
+        .join("");
+      return `
+        <article class="player-rank-card">
+          <img class="player-rank-photo" src="${escapeHtml(player?.image_url || "")}" alt="${escapeHtml(player?.name || "")}" />
+          <div class="player-rank-body">
+            <div class="player-rank-name">${escapeHtml(player?.name || "")}</div>
+            <ul class="player-rank-items">${items}</ul>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  const awardCards = awards
+    .map((award) => {
+      const kind = String(award?.kind || "");
+      const position = String(award?.position || "").trim();
+      const kicker = kind === "골든글러브" && position ? `골든글러브 · ${position}` : kind || "수상 유력";
+      const rivals = (Array.isArray(award?.rivals) ? award.rivals : [])
+        .map((rival) => {
+          const team = String(rival?.team || "").trim();
+          const who = team ? `${rival?.name || ""} (${team})` : String(rival?.name || "");
+          return `<li><span class="player-award-rival-name">${escapeHtml(who)}</span> ${escapeHtml(rival?.summary || "")}</li>`;
+        })
+        .join("");
+      return `
+        <article class="player-award-card">
+          <div class="player-award-kicker">${escapeHtml(kicker)} 유력</div>
+          <div class="player-award-main">
+            <img class="player-rank-photo" src="${escapeHtml(award?.image_url || "")}" alt="${escapeHtml(award?.name || "")}" />
+            <div class="player-rank-body">
+              <div class="player-rank-name">${escapeHtml(award?.name || "")}</div>
+              <p class="player-award-summary">${escapeHtml(award?.summary || "")}</p>
+            </div>
+          </div>
+          ${rivals ? `<ul class="player-award-rivals">${rivals}</ul>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+
+  return `
+    <section class="player-rank-section">
+      <h2 class="cmp-title">주요 선수 순위</h2>
+      ${
+        titleCards
+          ? `<h3 class="player-rank-sub">공식 타이틀 5위권</h3><div class="player-rank-grid">${titleCards}</div>`
+          : ""
+      }
+      ${
+        awardCards
+          ? `<h3 class="player-rank-sub">수상 유력</h3><div class="player-award-list">${awardCards}</div>`
+          : ""
+      }
+      <p class="player-rank-note">타이틀은 KBO 공식 시상 부문입니다. 신인왕·골든글러브는 투표 상이라, 자격과 시즌 성적으로 본 유력 후보만 표시하며 실제 수상과 다를 수 있습니다.</p>
+    </section>
+  `;
+};
 
 const renderSeriesSection = (g) => {
   const schedule = Array.isArray(g?.season_schedule) ? g.season_schedule : [];
@@ -2098,6 +2189,7 @@ const renderGame = (g, refreshedAt) => {
     ${renderLineupSection(g)}
     ${renderRegisterMoveSection(g)}
     ${renderPlayoffRaceSection(g)}
+    ${renderPlayerHighlightsSection(g)}
     ${renderSeriesSection(g)}
     ${renderEaglesTvSection(g)}
     ${renderLatestNewsSection(g)}

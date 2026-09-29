@@ -962,6 +962,7 @@ html[data-theme="dark"] .weather-chart-tip::after {
 .news-section,
 .weather-section,
 .playoff-race-section,
+.player-rank-section,
 .rank-section,
 .yesterday-league-section {
   margin-top: 24px;
@@ -1266,6 +1267,112 @@ html[data-theme="dark"] .weather-chart-tip::after {
   font-size: 13px;
   line-height: 1.5;
   color: var(--hes-text-muted);
+}
+
+.playoff-race-none {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--hes-text);
+}
+
+.player-rank-sub {
+  margin: 14px 0 8px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--hes-text);
+}
+
+.player-rank-empty,
+.player-rank-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--hes-text-muted);
+}
+
+.player-rank-grid,
+.player-award-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.player-rank-card,
+.player-award-card {
+  border: 1px solid var(--hes-border-strong);
+  border-radius: 10px;
+  background: var(--hes-bg-elevated);
+  padding: 10px;
+}
+
+.player-rank-card,
+.player-award-main {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.player-rank-photo {
+  width: 72px;
+  height: 96px;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: 8px;
+  background: #f0f0f0;
+  flex: none;
+}
+
+.player-rank-body {
+  min-width: 0;
+}
+
+.player-rank-name {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--hes-text);
+}
+
+.player-rank-items,
+.player-award-rivals {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.player-rank-items li,
+.player-award-rivals li {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--hes-text-secondary);
+}
+
+.player-rank-cat,
+.player-award-kicker {
+  font-weight: 800;
+  color: #c2410c;
+}
+
+.player-award-kicker {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.player-award-summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--hes-text-secondary);
+}
+
+.player-award-rival-name {
+  font-weight: 700;
+  color: var(--hes-text);
+}
+
+.player-award-list {
+  grid-template-columns: 1fr;
 }
 
 .playoff-race-grid {
@@ -2053,6 +2160,10 @@ html[data-theme="dark"] .playoff-race-card--wins {
   .weather-chart-xicon {
     font-size: 30px;
   }
+
+  .weather-chart-x--mobile-hide {
+    display: none;
+  }
 }
 
 /* 다크 모드 보완 (색상 변수로 처리되지 않는 요소) */
@@ -2075,6 +2186,15 @@ html[data-theme="dark"] .pitcher-card .pitcher-card-img {
 
 html[data-theme="dark"] .pitcher-card--emblem-pending .pitcher-card-img--emblem {
   background: linear-gradient(160deg, #3a3a3a 0%, #2a2a2a 100%);
+}
+
+html[data-theme="dark"] .player-rank-photo {
+  background: #1a1a1a;
+}
+
+html[data-theme="dark"] .player-rank-cat,
+html[data-theme="dark"] .player-award-kicker {
+  color: #fdba74;
 }
 
 html[data-theme="dark"] .weather-chart-temp-dot {
