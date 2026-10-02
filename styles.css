@@ -26,6 +26,14 @@
   --hes-result-win: #1f57bf;
   --hes-result-loss: #d24a13;
   --hes-result-live: #cc0015;
+  --hes-ps-wc-bg: #efe4ff;
+  --hes-ps-spo-bg: #e3f6e6;
+  --hes-ps-po-bg: #dce9ff;
+  --hes-ps-ks-bg: #ffe4e4;
+  --hes-ps-wc-text: #6d28d9;
+  --hes-ps-spo-text: #15803d;
+  --hes-ps-po-text: #1d4ed8;
+  --hes-ps-ks-text: #dc2626;
 }
 
 html[data-theme="dark"] {
@@ -57,6 +65,14 @@ html[data-theme="dark"] {
   --hes-result-win: #8eb8ff;
   --hes-result-loss: #ff9a7a;
   --hes-result-live: #ff7a8a;
+  --hes-ps-wc-bg: #3a2a52;
+  --hes-ps-spo-bg: #1c3f2c;
+  --hes-ps-po-bg: #1a3a66;
+  --hes-ps-ks-bg: #5a2428;
+  --hes-ps-wc-text: #d8b4fe;
+  --hes-ps-spo-text: #86efac;
+  --hes-ps-po-text: #93c5fd;
+  --hes-ps-ks-text: #fca5a5;
 }
 
 body {
@@ -1578,6 +1594,48 @@ html[data-theme="dark"] .playoff-race-card--wins {
   background: var(--hes-sched-draw-bg);
 }
 
+.sched-day.sched-day-ps-wc {
+  background: var(--hes-ps-wc-bg);
+}
+
+.sched-day.sched-day-ps-spo {
+  background: var(--hes-ps-spo-bg);
+}
+
+.sched-day.sched-day-ps-po {
+  background: var(--hes-ps-po-bg);
+}
+
+.sched-day.sched-day-ps-ks {
+  background: var(--hes-ps-ks-bg);
+}
+
+.sched-ps-label {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.sched-ps-round {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.sched-ps-wc { color: var(--hes-ps-wc-text); }
+.sched-ps-spo { color: var(--hes-ps-spo-text); }
+.sched-ps-po { color: var(--hes-ps-po-text); }
+.sched-ps-ks { color: var(--hes-ps-ks-text); }
+
+.sched-day.sched-day-ps .sched-time {
+  margin-top: 4px;
+}
+
 .sched-day-empty {
   background: transparent;
   border: none;
@@ -1704,6 +1762,10 @@ html[data-theme="dark"] .playoff-race-card--wins {
 .sched-dot-home-border { background: transparent; border: 2px solid var(--hes-sched-home-border); box-sizing: border-box; }
 .sched-dot-win { background: var(--hes-sched-win-bg); border: 1px solid var(--hes-sched-border); box-sizing: border-box; }
 .sched-dot-loss { background: var(--hes-sched-loss-bg); border: 1px solid var(--hes-sched-border); box-sizing: border-box; }
+.sched-dot-ps-wc { background: var(--hes-ps-wc-bg); border: 1px solid var(--hes-sched-border); box-sizing: border-box; }
+.sched-dot-ps-spo { background: var(--hes-ps-spo-bg); border: 1px solid var(--hes-sched-border); box-sizing: border-box; }
+.sched-dot-ps-po { background: var(--hes-ps-po-bg); border: 1px solid var(--hes-sched-border); box-sizing: border-box; }
+.sched-dot-ps-ks { background: var(--hes-ps-ks-bg); border: 1px solid var(--hes-sched-border); box-sizing: border-box; }
 
 .sched-summary-wrap {
   margin-top: 10px;
@@ -2037,6 +2099,18 @@ html[data-theme="dark"] .playoff-race-card--wins {
   .sched-no-game,
   .sched-cancel {
     margin-top: 26px;
+  }
+
+  .sched-day.sched-day-ps .sched-time {
+    margin-top: 2px;
+  }
+
+  .sched-ps-label {
+    font-size: 11px;
+  }
+
+  .sched-ps-round {
+    font-size: 10px;
   }
 
   .sched-score {

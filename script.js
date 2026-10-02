@@ -1341,6 +1341,68 @@ const renderPlayerHighlightsSection = (g) => {
   `;
 };
 
+const KBO_POSTSEASON_2026 = [
+  { date: "2026-10-13", series: "WC", kind: "off", note: "미디어데이" },
+  { date: "2026-10-14", series: "WC", kind: "game", game: 1, time: "18:30" },
+  { date: "2026-10-15", series: "WC", kind: "game", game: 2, time: "18:30" },
+  { date: "2026-10-16", series: "SPO", kind: "off", note: "미디어데이" },
+  { date: "2026-10-17", series: "SPO", kind: "game", game: 1, time: "14:00" },
+  { date: "2026-10-18", series: "SPO", kind: "game", game: 2, time: "14:00" },
+  { date: "2026-10-19", series: "SPO", kind: "off", note: "이동일" },
+  { date: "2026-10-20", series: "SPO", kind: "game", game: 3, time: "18:30" },
+  { date: "2026-10-21", series: "SPO", kind: "game", game: 4, time: "18:30" },
+  { date: "2026-10-22", series: "SPO", kind: "off", note: "이동일" },
+  { date: "2026-10-23", series: "SPO", kind: "game", game: 5, time: "18:30" },
+  { date: "2026-10-24", series: "PO", kind: "off", note: "미디어데이" },
+  { date: "2026-10-25", series: "PO", kind: "game", game: 1, time: "14:00" },
+  { date: "2026-10-26", series: "PO", kind: "game", game: 2, time: "18:30" },
+  { date: "2026-10-27", series: "PO", kind: "off", note: "이동일" },
+  { date: "2026-10-28", series: "PO", kind: "game", game: 3, time: "18:30" },
+  { date: "2026-10-29", series: "PO", kind: "game", game: 4, time: "18:30" },
+  { date: "2026-10-30", series: "PO", kind: "off", note: "이동일" },
+  { date: "2026-10-31", series: "PO", kind: "game", game: 5, time: "14:00" },
+  { date: "2026-11-01", series: "KS", kind: "off", note: "미디어데이" },
+  { date: "2026-11-02", series: "KS", kind: "game", game: 1, time: "18:30" },
+  { date: "2026-11-03", series: "KS", kind: "game", game: 2, time: "18:30" },
+  { date: "2026-11-04", series: "KS", kind: "off", note: "이동일" },
+  { date: "2026-11-05", series: "KS", kind: "game", game: 3, time: "18:30" },
+  { date: "2026-11-06", series: "KS", kind: "game", game: 4, time: "18:30" },
+  { date: "2026-11-07", series: "KS", kind: "game", game: 5, time: "14:00" },
+  { date: "2026-11-08", series: "KS", kind: "off", note: "이동일" },
+  { date: "2026-11-09", series: "KS", kind: "game", game: 6, time: "18:30" },
+  { date: "2026-11-10", series: "KS", kind: "game", game: 7, time: "18:30" },
+];
+
+const POSTSEASON_SERIES_LABEL = {
+  WC: "WC",
+  SPO: "준PO",
+  PO: "PO",
+  KS: "KS",
+};
+
+const postseasonByDate = Object.fromEntries(
+  KBO_POSTSEASON_2026.map((item) => [item.date, item])
+);
+
+const renderPostseasonDayMeta = (item) => {
+  if (!item) return "";
+  const label = POSTSEASON_SERIES_LABEL[item.series] || "";
+  const seriesClass = `sched-ps-${String(item.series || "").toLowerCase()}`;
+  const detail = item.kind === "game"
+    ? `${item.game}차전`
+    : (item.note === "미디어데이" ? "미디어<wbr>데이" : (item.note || ""));
+  const time = item.kind === "game" && item.time
+    ? `<div class="sched-time">${item.time}</div>`
+    : "";
+  return `
+    <div class="sched-ps">
+      <div class="sched-ps-label ${seriesClass}">${label}</div>
+      <div class="sched-ps-round">${detail}</div>
+      ${time}
+    </div>
+  `;
+};
+
 const renderSeriesSection = (g) => {
   const schedule = Array.isArray(g?.season_schedule) ? g.season_schedule : [];
   if (schedule.length === 0) return "";
@@ -1351,7 +1413,11 @@ const renderSeriesSection = (g) => {
   };
   const today = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const todayKey = today.toISOString().slice(0, 10);
-  const monthKeys = Array.from(new Set(schedule.map((x) => toMonthFromYmd(x?.date)).filter(Boolean))).sort();
+  const postseasonMonthKeys = KBO_POSTSEASON_2026.map((item) => String(item.date || "").slice(0, 7));
+  const monthKeys = Array.from(new Set([
+    ...schedule.map((x) => toMonthFromYmd(x?.date)).filter(Boolean),
+    ...postseasonMonthKeys,
+  ])).sort();
   if (monthKeys.length === 0) return "";
   const minMonth = monthKeys[0];
   const maxMonth = monthKeys[monthKeys.length - 1];
@@ -1401,12 +1467,17 @@ const renderSeriesSection = (g) => {
   for (let day = 1; day <= lastDayNo; day += 1) {
     const ymd = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const row = pickForDate(ymd);
+    const postseason = postseasonByDate[ymd] || null;
     const isToday = ymd === todayKey;
     const dayOfWeek = new Date(viewYear, viewMonth, day).getDay();
     const holidayName = getHolidayName(ymd);
     const classes = ["sched-day"];
     if (isToday) classes.push("sched-day-today");
     if (row) classes.push("sched-day-game");
+    if (postseason && !row) {
+      classes.push("sched-day-ps");
+      if (postseason.kind === "game") classes.push(`sched-day-ps-${String(postseason.series).toLowerCase()}`);
+    }
     if (dayOfWeek === 6) classes.push("sched-day-sat");
     if (dayOfWeek === 0) classes.push("sched-day-sun");
     if (holidayName) classes.push("sched-day-holiday");
@@ -1450,7 +1521,7 @@ const renderSeriesSection = (g) => {
               : `<div class="sched-time">${timeText || "-"}</div>`
         }
       `
-      : '<div class="sched-no-game">-</div>';
+      : (renderPostseasonDayMeta(postseason) || '<div class="sched-no-game">-</div>');
     const linkUrl = getScheduleCardLinkUrl(row, g?.season_id);
     if (linkUrl) classes.push("sched-day-clickable");
     const holidayMeta = holidayName ? `<div class="sched-holiday-name">${holidayName}</div>` : "";
@@ -1515,6 +1586,10 @@ const renderSeriesSection = (g) => {
         <span><em class="sched-dot-home-border"></em>홈경기</span>
         <span><em class="sched-dot-win"></em>승</span>
         <span><em class="sched-dot-loss"></em>패</span>
+        <span><em class="sched-dot-ps-wc"></em>WC</span>
+        <span><em class="sched-dot-ps-spo"></em>준PO</span>
+        <span><em class="sched-dot-ps-po"></em>PO</span>
+        <span><em class="sched-dot-ps-ks"></em>KS</span>
       </div>
     </section>
   `;
