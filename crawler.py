@@ -5,6 +5,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
+from pathlib import Path
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
 import time
@@ -33,6 +34,7 @@ NAVER_KBO_LAST10_URL = (
 )
 NAVER_KBO_PLAYERS_URL = NAVER_SPORTS_API_BASE + "/statistics/categories/kbo/seasons/{season}/players"
 KBO_DEFENSE_BASIC_URL = "https://www.koreabaseball.com/Record/Player/Defense/Basic.aspx"
+KBO_MONTH_SCHEDULE_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetMonthSchedule"
 KBO_HITTER_TOTAL_URL = "https://www.koreabaseball.com/Record/Player/HitterDetail/Total.aspx"
 KBO_PITCHER_TOTAL_URL = "https://www.koreabaseball.com/Record/Player/PitcherDetail/Total.aspx"
 YOUTUBE_PLAYLIST_FEED_URL = "https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
@@ -4036,8 +4038,11 @@ def _parse_defense_table(html: str) -> list[Dict[str, Any]]:
         id_match = re.search(r"playerId=(\d+)", href)
         if not id_match:
             continue
+        def cell_int(text: str) -> int:
+            match = re.search(r"\d+", text or "")
+            return int(match.group(0)) if match else 0
+
         gs_match = re.search(r"\d+", cells[5])
-        error_match = re.search(r"\d+", cells[7])
         fpct = None
         cs_pct = None
         try:
@@ -4056,7 +4061,12 @@ def _parse_defense_table(html: str) -> list[Dict[str, Any]]:
                 "team": cells[2],
                 "position": cells[3],
                 "gs": int(gs_match.group(0)) if gs_match else 0,
-                "errors": int(error_match.group(0)) if error_match else 0,
+                "ip": _parse_ip_value(cells[6]) if len(cells) > 6 else 0.0,
+                "errors": cell_int(cells[7]) if len(cells) > 7 else 0,
+                "po": cell_int(cells[9]) if len(cells) > 9 else 0,
+                "assists": cell_int(cells[10]) if len(cells) > 10 else 0,
+                "sb": cell_int(cells[14]) if len(cells) > 14 else 0,
+                "cs": cell_int(cells[15]) if len(cells) > 15 else 0,
                 "fpct": fpct,
                 "cs_pct": cs_pct,
             }
@@ -4110,19 +4120,27 @@ def _fetch_kbo_defense_rows() -> list[Dict[str, Any]]:
     rows = _parse_defense_table(html)
     seen = {(row["player_id"], row["position"]) for row in rows}
     current_page = 1
-    for _ in range(6):
+    for _ in range(25):
         soup = BeautifulSoup(html, "html.parser")
         page_buttons = []
+        next_target = ""
         for anchor in soup.select("a"):
             href = str(anchor.get("href") or "")
             match = re.search(r"__doPostBack\('([^']*ucPager\$btnNo(\d+))'", href)
             if match:
                 page_buttons.append((int(match.group(2)), match.group(1)))
+                continue
+            next_match = re.search(r"__doPostBack\('([^']*ucPager\$btnNext)'", href)
+            if next_match:
+                next_target = next_match.group(1)
         upcoming = [item for item in page_buttons if item[0] > current_page]
-        if not upcoming:
+        if upcoming:
+            upcoming.sort()
+            next_page, event_target = upcoming[0]
+        elif next_target:
+            next_page, event_target = current_page + 1, next_target
+        else:
             break
-        upcoming.sort()
-        next_page, event_target = upcoming[0]
         try:
             html = _kbo_asp_post(session, KBO_DEFENSE_BASIC_URL, html, event_target)
         except Exception:
@@ -4135,19 +4153,6 @@ def _fetch_kbo_defense_rows() -> list[Dict[str, Any]]:
         seen.update((row["player_id"], row["position"]) for row in fresh)
         current_page = next_page
     return rows
-
-
-def _profile_position(row: Dict[str, Any]) -> str:
-    raw = row.get("profile")
-    if not isinstance(raw, str) or not raw.strip():
-        return ""
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        return ""
-    if not isinstance(payload, dict):
-        return ""
-    return str(payload.get("position") or "")
 
 
 def _gg_bucket(position: str) -> str:
@@ -4293,6 +4298,388 @@ def _build_hanwha_title_cards(season: str) -> list[Dict[str, Any]]:
     return cards
 
 
+_GG_DH_PA_CACHE_PATH = Path(__file__).resolve().parent / "gg-dh-pa-cache.json"
+_GG_FULL_SEASON_GAMES = 144
+_GG_FIELD_BUCKETS = ("포수", "1루수", "2루수", "3루수", "유격수", "외야수")
+_GG_TEAM_CODE_TO_NAME = {
+    "HH": "한화",
+    "HT": "KIA",
+    "LG": "LG",
+    "OB": "두산",
+    "SS": "삼성",
+    "SK": "SSG",
+    "NC": "NC",
+    "WO": "키움",
+    "LT": "롯데",
+    "KT": "KT",
+}
+
+
+def _norm_gg_team_name(name: str) -> str:
+    raw = str(name or "").strip()
+    compact = raw.replace(" ", "").lower()
+    aliases = {
+        "한화": "한화",
+        "한화이글스": "한화",
+        "kt": "KT",
+        "kt위즈": "KT",
+        "ktwiz": "KT",
+        "삼성": "삼성",
+        "삼성라이온즈": "삼성",
+        "kia": "KIA",
+        "kia타이거즈": "KIA",
+        "lg": "LG",
+        "lg트윈스": "LG",
+        "두산": "두산",
+        "두산베어스": "두산",
+        "ssg": "SSG",
+        "ssg랜더스": "SSG",
+        "sk": "SSG",
+        "nc": "NC",
+        "nc다이노스": "NC",
+        "롯데": "롯데",
+        "롯데자이언츠": "롯데",
+        "키움": "키움",
+        "키움히어로즈": "키움",
+    }
+    return aliases.get(compact, raw)
+
+
+def _format_ip(value: float) -> str:
+    whole = int(value)
+    thirds = int(round((value - whole) * 3))
+    if thirds >= 3:
+        whole += 1
+        thirds = 0
+    if thirds <= 0:
+        return str(whole)
+    return f"{whole} {thirds}/3"
+
+
+def _gg_field_innings_min(team: str, games_by_team: Dict[str, int]) -> float:
+    # 144경기 시즌의 720이닝 = 팀 경기 수 × 5.
+    games = games_by_team.get(_norm_gg_team_name(team)) or _GG_FULL_SEASON_GAMES
+    return float(int(games) * 5)
+
+
+def _gg_dh_pa_min(team: str, games_by_team: Dict[str, int]) -> int:
+    # 144경기 규정타석 446의 ⅔ = 297타석. 규정타석은 팀 경기 수 × 3.1.
+    games = games_by_team.get(_norm_gg_team_name(team)) or _GG_FULL_SEASON_GAMES
+    qualified_pa = int(int(games) * 3.1)
+    return int(qualified_pa * 2 / 3)
+
+
+def _is_dh_box_position(text: str) -> bool:
+    """박스스코어 포지션이 지명타자(지, 타지)일 때만 참. 타포·타좌 같은 대타는 제외."""
+    raw = re.sub(r"\s+", "", str(text or ""))
+    if "지" not in raw:
+        return False
+    core = raw
+    while core and core[0] in "타주수":
+        core = core[1:]
+    return core == "지"
+
+
+def _fetch_team_game_counts(season: str) -> Dict[str, int]:
+    try:
+        response = requests.get(
+            NAVER_KBO_TEAM_RANK_URL.format(season=season),
+            headers=_naver_sports_headers(),
+            timeout=15,
+        )
+        response.raise_for_status()
+        rows = ((response.json().get("result") or {}).get("seasonTeamStats") or [])
+    except Exception:
+        return {}
+    counts: Dict[str, int] = {}
+    if not isinstance(rows, list):
+        return counts
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = _norm_gg_team_name(str(row.get("teamName") or ""))
+        try:
+            games = int(row.get("gameCount"))
+        except (TypeError, ValueError):
+            continue
+        if name and games > 0:
+            counts[name] = games
+    return counts
+
+
+def _gg_player_index(*groups: list[Dict[str, Any]]) -> Dict[tuple[str, str], str]:
+    index: Dict[tuple[str, str], str] = {}
+    for group in groups:
+        for row in group:
+            if "playerId" in row or "playerName" in row:
+                name = str(row.get("playerName") or "").strip()
+                team = _norm_gg_team_name(str(row.get("teamName") or ""))
+                player_id = str(row.get("playerId") or "").strip()
+            else:
+                name = str(row.get("name") or "").strip()
+                team = _norm_gg_team_name(str(row.get("team") or ""))
+                player_id = str(row.get("player_id") or "").strip()
+            if name and team and player_id:
+                index[(name, team)] = player_id
+    return index
+
+
+def _box_cell_text(cell: Any) -> str:
+    if isinstance(cell, dict):
+        text = str(cell.get("Text") or "")
+    else:
+        text = str(cell or "")
+    return text.replace("\xa0", " ").replace("&nbsp;", " ").strip()
+
+
+def _dh_entries_from_box(box: Dict[str, Any], game_id: str) -> Optional[list[Dict[str, Any]]]:
+    if str(box.get("code", "")) != "100" or len(game_id) < 13:
+        return None
+    arr = box.get("arrHitter") or []
+    if len(arr) < 2:
+        return None
+    teams = [
+        _GG_TEAM_CODE_TO_NAME.get(game_id[8:10], ""),
+        _GG_TEAM_CODE_TO_NAME.get(game_id[10:12], ""),
+    ]
+    entries: list[Dict[str, Any]] = []
+    for side, item in enumerate(arr[:2]):
+        team = teams[side]
+        if not team or not isinstance(item, dict):
+            continue
+        try:
+            table_names = json.loads(str(item.get("table1") or "{}"))
+            table_events = json.loads(str(item.get("table2") or "{}"))
+        except Exception:
+            return None
+        name_rows = table_names.get("rows") or []
+        event_rows = table_events.get("rows") or []
+        for index, name_row in enumerate(name_rows):
+            cells = (name_row or {}).get("row") or []
+            texts = [_box_cell_text(cell) for cell in cells[:3]]
+            if len(texts) < 3 or not re.fullmatch(r"\d+", texts[0]):
+                continue
+            if not _is_dh_box_position(texts[1]) or not texts[2]:
+                continue
+            event_cells = (event_rows[index].get("row") or []) if index < len(event_rows) else []
+            plate_appearances = sum(
+                1 for cell in event_cells if _box_cell_text(cell) not in {"", "-"}
+            )
+            if plate_appearances <= 0:
+                continue
+            entries.append({"name": texts[2], "team": team, "pa": plate_appearances})
+    return entries
+
+
+def _fetch_game_dh_entries(game_id: str) -> Optional[list[Dict[str, Any]]]:
+    payload = {
+        "leId": "1",
+        "srId": game_id[-1:] or "0",
+        "seasonId": game_id[:4],
+        "gameId": game_id,
+    }
+    last_box: Dict[str, Any] = {}
+    for _ in range(2):
+        try:
+            response = requests.post(
+                KBO_BOX_SCORE_SCROLL_URL,
+                data=payload,
+                headers=_kbo_api_headers(),
+                timeout=12,
+            )
+            response.raise_for_status()
+            last_box = json.loads(response.content.decode("utf-8-sig"))
+            parsed = _dh_entries_from_box(last_box, game_id)
+            if parsed is not None:
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _regular_season_game_ids(season: str) -> list[str]:
+    today = _today_kst()
+    last_month = 10
+    if str(today.year) == str(season):
+        last_month = min(10, max(3, today.month))
+    found: list[str] = []
+    seen = set()
+    for month in range(3, last_month + 1):
+        try:
+            response = requests.post(
+                KBO_MONTH_SCHEDULE_URL,
+                data={
+                    "leId": "1",
+                    "srIdList": "0",
+                    "seasonId": str(season),
+                    "gameMonth": f"{month:02d}",
+                },
+                headers=_kbo_api_headers(),
+                timeout=20,
+            )
+            response.raise_for_status()
+            text = response.content.decode("utf-8-sig", errors="replace")
+        except Exception:
+            continue
+        for game_id in re.findall(r"gameId=(\d{8}[A-Z]{4}\d)", text):
+            if not game_id.endswith("0") or game_id in seen:
+                continue
+            seen.add(game_id)
+            found.append(game_id)
+    found.sort()
+    return found
+
+
+def _load_gg_dh_cache(season: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(_GG_DH_PA_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        payload = None
+    if not isinstance(payload, dict) or str(payload.get("season") or "") != str(season):
+        return {"season": str(season), "games": {}}
+    games = payload.get("games")
+    if not isinstance(games, dict):
+        games = {}
+    return {"season": str(season), "games": games}
+
+
+def _save_gg_dh_cache(cache: Dict[str, Any]) -> None:
+    temporary = _GG_DH_PA_CACHE_PATH.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(cache, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    temporary.replace(_GG_DH_PA_CACHE_PATH)
+
+
+def _update_dh_pa_cache(season: str) -> Dict[str, list]:
+    """정규시즌 박스스코어에서 지명타자 타석을 모아 둔다. 끝난 경기만 캐시한다."""
+    cache = _load_gg_dh_cache(season)
+    games: Dict[str, list] = cache["games"]
+    live_games: Dict[str, list] = {}
+    try:
+        game_ids = _regular_season_game_ids(season)
+    except Exception:
+        return games
+    today = _today_kst()
+    pending: list[str] = []
+    for game_id in game_ids:
+        try:
+            game_day = datetime.strptime(game_id[:8], "%Y%m%d").date()
+        except ValueError:
+            continue
+        if game_day > today:
+            continue
+        if game_day < today and game_id in games:
+            continue
+        pending.append(game_id)
+    if not pending:
+        return games
+
+    def fetch(game_id: str) -> tuple[str, Optional[list]]:
+        return game_id, _fetch_game_dh_entries(game_id)
+
+    done = 0
+    for _attempt in range(2):
+        if not pending:
+            break
+        failed: list[str] = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for game_id, entries in executor.map(fetch, pending):
+                done += 1
+                if entries is None:
+                    failed.append(game_id)
+                    continue
+                game_day = datetime.strptime(game_id[:8], "%Y%m%d").date()
+                if game_day < today:
+                    games[game_id] = entries
+                else:
+                    live_games[game_id] = entries
+                if done % 40 == 0:
+                    _save_gg_dh_cache(cache)
+        pending = failed
+        _save_gg_dh_cache(cache)
+    _save_gg_dh_cache(cache)
+    merged = dict(games)
+    merged.update(live_games)
+    return merged
+
+
+def _sum_dh_pa(games: Dict[str, list], index: Dict[tuple[str, str], str]) -> Dict[str, int]:
+    totals: Dict[str, int] = {}
+    for entries in games.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            team = _norm_gg_team_name(str(entry.get("team") or ""))
+            try:
+                plate_appearances = int(entry.get("pa") or 0)
+            except (TypeError, ValueError):
+                plate_appearances = 0
+            player_id = index.get((name, team))
+            if not player_id or plate_appearances <= 0:
+                continue
+            totals[player_id] = totals.get(player_id, 0) + plate_appearances
+    return totals
+
+
+def _finalize_defense_totals(acc: Dict[str, Any]) -> Dict[str, Any]:
+    putouts = int(acc.get("po") or 0)
+    assists = int(acc.get("assists") or 0)
+    errors = int(acc.get("errors") or 0)
+    chances = putouts + assists + errors
+    fielding = (putouts + assists) / chances if chances else acc.get("fpct")
+    stolen = int(acc.get("sb") or 0)
+    caught = int(acc.get("cs") or 0)
+    caught_pct = (caught / (stolen + caught) * 100) if (stolen + caught) else acc.get("cs_pct")
+    return {
+        "gs": int(acc.get("gs") or 0),
+        "errors": errors,
+        "fpct": fielding if isinstance(fielding, float) else None,
+        "cs_pct": caught_pct if isinstance(caught_pct, float) else None,
+        "ip": float(acc.get("ip") or 0),
+        "team": str(acc.get("team") or ""),
+        "name": str(acc.get("name") or ""),
+    }
+
+
+def _pitcher_meets_gg_standard(row: Dict[str, Any]) -> bool:
+    if row.get("isQualified"):
+        return True
+    wins = _stat_sort_value(row, "pitcherWin", None) or 0
+    saves = _stat_sort_value(row, "pitcherSave", None) or 0
+    holds = _stat_sort_value(row, "pitcherHold", None) or 0
+    return wins >= 10 or saves >= 30 or holds >= 30
+
+
+def _gg_candidate_summary(item: Dict[str, Any], bucket: str) -> str:
+    if item.get("hitter") is None:
+        return str(item.get("summary") or "")
+    summary = _hitter_stat_summary(item["hitter"])
+    extras: list[str] = []
+    if bucket == "지명타자":
+        dh_pa = item.get("dh_pa")
+        if isinstance(dh_pa, int) and dh_pa > 0:
+            extras.append(f"지명타자 {dh_pa}타석")
+    else:
+        defense = item.get("defense") or {}
+        if defense:
+            extras.append(f"선발 {int(defense.get('gs') or 0)}경기")
+            innings = defense.get("ip")
+            if isinstance(innings, (int, float)) and float(innings) > 0:
+                extras.append(f"수비 {_format_ip(float(innings))}이닝")
+            if bucket == "포수" and isinstance(defense.get("cs_pct"), float):
+                extras.append(f"도루저지 {defense['cs_pct']:.1f}%")
+            elif isinstance(defense.get("fpct"), float):
+                extras.append(f"수비율 {defense['fpct']:.3f}")
+    if extras:
+        return " · ".join([summary, *extras])
+    return summary
+
+
 def _build_golden_glove_awards(
     hitters: list[Dict[str, Any]],
     pitchers: list[Dict[str, Any]],
@@ -4301,24 +4688,65 @@ def _build_golden_glove_awards(
 ) -> list[Dict[str, Any]]:
     hitter_by_id = {str(row.get("playerId") or ""): row for row in hitters}
     awards: list[Dict[str, Any]] = []
+    games_by_team = _fetch_team_game_counts(season)
+    try:
+        dh_pa_by_id = _sum_dh_pa(_update_dh_pa_cache(season), _gg_player_index(hitters, defense_rows))
+    except Exception:
+        dh_pa_by_id = {}
 
-    primary_by_player: Dict[str, Dict[str, Any]] = {}
+    totals_by_bucket: Dict[tuple[str, str], Dict[str, Any]] = {}
     for row in defense_rows:
-        current = primary_by_player.get(row["player_id"])
-        if current is None or int(row["gs"]) > int(current["gs"]):
-            primary_by_player[row["player_id"]] = row
+        bucket = _gg_bucket(str(row.get("position") or ""))
+        player_id = str(row.get("player_id") or "")
+        if bucket not in _GG_FIELD_BUCKETS or not player_id:
+            continue
+        acc = totals_by_bucket.get((player_id, bucket))
+        if acc is None:
+            acc = {
+                "po": 0,
+                "assists": 0,
+                "errors": 0,
+                "sb": 0,
+                "cs": 0,
+                "gs": 0,
+                "ip": 0.0,
+                "fpct": None,
+                "cs_pct": None,
+                "team": str(row.get("team") or ""),
+                "name": str(row.get("name") or ""),
+            }
+            totals_by_bucket[(player_id, bucket)] = acc
+        acc["po"] += int(row.get("po") or 0)
+        acc["assists"] += int(row.get("assists") or 0)
+        acc["errors"] += int(row.get("errors") or 0)
+        acc["sb"] += int(row.get("sb") or 0)
+        acc["cs"] += int(row.get("cs") or 0)
+        acc["gs"] += int(row.get("gs") or 0)
+        acc["ip"] += float(row.get("ip") or 0)
+        if row.get("fpct") is not None:
+            acc["fpct"] = row.get("fpct")
+        if row.get("cs_pct") is not None:
+            acc["cs_pct"] = row.get("cs_pct")
 
     buckets: Dict[str, list[Dict[str, Any]]] = {name: [] for name in _GG_POSITION_ORDER}
-    max_gs = max((int(row["gs"]) for row in primary_by_player.values()), default=0)
-    min_gs = max(25, int(max_gs * 0.55)) if max_gs else 25
-    used_ids = set()
-    for player_id, defense in primary_by_player.items():
-        bucket = _gg_bucket(str(defense.get("position") or ""))
+    field_player_ids = set()
+    best_field: Dict[str, Dict[str, Any]] = {}
+    for (player_id, bucket), acc in totals_by_bucket.items():
         hitter = hitter_by_id.get(player_id)
-        if bucket not in buckets or bucket == "투수" or hitter is None:
+        if hitter is None:
             continue
-        if int(defense.get("gs") or 0) < min_gs:
+        team_name = str(hitter.get("teamName") or acc.get("team") or "")
+        defense = _finalize_defense_totals(acc)
+        if defense["ip"] + 1e-6 < _gg_field_innings_min(team_name, games_by_team):
             continue
+        current = best_field.get(player_id)
+        if current is None or float(defense["ip"]) > float(current["ip"]):
+            best_field[player_id] = {"bucket": bucket, "defense": defense, "ip": defense["ip"], "hitter": hitter}
+
+    for player_id, picked in best_field.items():
+        hitter = picked["hitter"]
+        bucket = str(picked["bucket"])
+        defense = picked["defense"]
         buckets[bucket].append(
             {
                 "player_id": player_id,
@@ -4332,34 +4760,34 @@ def _build_golden_glove_awards(
                 "defense": defense,
             }
         )
-        used_ids.add(player_id)
+        field_player_ids.add(player_id)
 
     for hitter in hitters:
         player_id = str(hitter.get("playerId") or "")
-        if not player_id or player_id in used_ids:
+        if not player_id or player_id in field_player_ids:
             continue
-        if "지명" not in _profile_position(hitter):
-            continue
-        games = _stat_sort_value(hitter, "hitterGameCount", None) or 0
-        if games < min_gs:
+        plate_appearances = int(dh_pa_by_id.get(player_id) or 0)
+        team_name = str(hitter.get("teamName") or "")
+        if plate_appearances < _gg_dh_pa_min(team_name, games_by_team):
             continue
         buckets["지명타자"].append(
             {
                 "player_id": player_id,
                 "name": str(hitter.get("playerName") or ""),
-                "team": str(hitter.get("teamName") or ""),
+                "team": team_name,
                 "hanwha": _is_hanwha_player_row(hitter),
                 "image_url": _face_image_url(season, player_id),
                 "summary": "",
                 "score": _gg_score(hitter, None, "지명타자"),
                 "hitter": hitter,
                 "defense": None,
+                "dh_pa": plate_appearances,
             }
         )
 
-    era_rows = _fetch_sorted_players(season, "PITCHER", "pitcherEra", "asc", 40)
-    qualified_pitchers = [row for row in era_rows if row.get("isQualified")]
-    for row in qualified_pitchers:
+    for row in pitchers:
+        if not _pitcher_meets_gg_standard(row):
+            continue
         era = _stat_sort_value(row, "pitcherEra", 2)
         war = _stat_sort_value(row, "pitcherWar", 2) or 0.0
         if era is None:
@@ -4405,19 +4833,7 @@ def _build_golden_glove_awards(
             for rival in top_context:
                 if rival["player_id"] == winner["player_id"]:
                     continue
-                summary = rival["summary"]
-                if rival.get("hitter") is not None:
-                    summary = _hitter_stat_summary(rival["hitter"])
-                    defense = rival.get("defense")
-                    extras = []
-                    if defense:
-                        extras.append(f"선발 {defense['gs']}경기")
-                        if bucket == "포수" and isinstance(defense.get("cs_pct"), float):
-                            extras.append(f"도루저지 {defense['cs_pct']:.1f}%")
-                        elif isinstance(defense.get("fpct"), float) and bucket != "지명타자":
-                            extras.append(f"수비율 {defense['fpct']:.3f}")
-                    if extras:
-                        summary = " · ".join([summary, *extras])
+                summary = _gg_candidate_summary(rival, bucket)
                 rivals.append(
                     {
                         "name": rival["name"],
@@ -4427,19 +4843,7 @@ def _build_golden_glove_awards(
                 )
                 if len(rivals) >= 3:
                     break
-            summary = winner["summary"]
-            if winner.get("hitter") is not None:
-                summary = _hitter_stat_summary(winner["hitter"])
-                defense = winner.get("defense")
-                extras = []
-                if defense:
-                    extras.append(f"선발 {defense['gs']}경기")
-                    if bucket == "포수" and isinstance(defense.get("cs_pct"), float):
-                        extras.append(f"도루저지 {defense['cs_pct']:.1f}%")
-                    elif isinstance(defense.get("fpct"), float) and bucket != "지명타자":
-                        extras.append(f"수비율 {defense['fpct']:.3f}")
-                if extras:
-                    summary = " · ".join([summary, *extras])
+            summary = _gg_candidate_summary(winner, bucket)
             awards.append(
                 {
                     "kind": "골든글러브",

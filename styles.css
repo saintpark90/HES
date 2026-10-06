@@ -1308,6 +1308,39 @@ html[data-theme="dark"] .weather-chart-tip::after {
   color: var(--hes-text-muted);
 }
 
+.player-award-criteria {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--hes-border-strong);
+  border-radius: 10px;
+  background: var(--hes-bg-elevated);
+}
+
+.player-award-criteria-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--hes-text);
+}
+
+.player-award-criteria ul {
+  margin: 6px 0 0;
+  padding-left: 1.15em;
+}
+
+.player-award-criteria li,
+.player-award-criteria p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--hes-text-secondary);
+}
+
+.player-award-criteria p {
+  margin-top: 6px;
+  color: var(--hes-text-muted);
+}
+
 .player-rank-grid,
 .player-award-list {
   display: grid;

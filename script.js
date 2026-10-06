@@ -1333,7 +1333,17 @@ const renderPlayerHighlightsSection = (g) => {
       }
       ${
         awardCards
-          ? `<h3 class="player-rank-sub">수상 유력</h3><div class="player-award-list">${awardCards}</div>`
+          ? `<h3 class="player-rank-sub">수상 유력</h3>
+            <div class="player-award-criteria">
+              <p class="player-award-criteria-title">골든글러브 후보 기준</p>
+              <ul>
+                <li>투수: 규정 이닝 충족 또는 10승 이상, 30세이브 이상, 30홀드 이상 중 하나에 해당</li>
+                <li>포수 및 야수: 해당 포지션에서 720이닝(팀 경기 수 × 5이닝) 이상 수비 출장</li>
+                <li>지명타자: 규정 타석의 ⅔인 297타석 이상 지명타자 타석 소화</li>
+              </ul>
+              <p>144경기 기준 숫자입니다. 팀 경기 수가 그보다 적으면 수비는 팀 경기 수×5이닝, 지명타자는 규정 타석(팀 경기 수×3.1)의 ⅔로 적용합니다.</p>
+            </div>
+            <div class="player-award-list">${awardCards}</div>`
           : ""
       }
       <p class="player-rank-note">타이틀은 KBO 공식 시상 부문입니다. 신인왕·골든글러브는 투표 상이라, 자격과 시즌 성적으로 본 유력 후보만 표시하며 실제 수상과 다를 수 있습니다.</p>
