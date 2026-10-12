@@ -117,7 +117,14 @@ def _build_og_context(game_info: dict | None) -> dict:
     share_url = request.url_root.rstrip("/") + url_for("share_hanwha_next")
     fixed_thumb_url = request.url_root.rstrip("/") + url_for("thumbnail_png")
 
-    if game_info:
+    if game_info and game_info.get("is_postseason"):
+        title = f"{game_info.get('postseason_label') or '가을야구'}: {game_info.get('matchup') or ''}".strip()
+        description = (
+            f"{game_info.get('game_date') or ''} {game_info.get('game_time') or ''} | "
+            f"{game_info.get('stadium') or ''}"
+        ).strip()
+        image_url = fixed_thumb_url
+    elif game_info:
         title = f"한화 다음 경기: {game_info['matchup']}"
         description = (
             f"{game_info['game_date']} {game_info['game_time']} | "

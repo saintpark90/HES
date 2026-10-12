@@ -1351,6 +1351,7 @@ const renderPlayerHighlightsSection = (g) => {
   `;
 };
 
+// crawler.py KBO_POSTSEASON_2026 과 같은 일정.
 const KBO_POSTSEASON_2026 = [
   { date: "2026-10-13", series: "WC", kind: "off", note: "미디어데이" },
   { date: "2026-10-14", series: "WC", kind: "game", game: 1, time: "18:30" },
@@ -1553,7 +1554,7 @@ const renderSeriesSection = (g) => {
 
   return `
     <section class="series-section">
-      <h2 class="cmp-title">한화 월별 일정</h2>
+      <h2 class="cmp-title">${viewMonth + 1}월 경기 일정</h2>
       <div class="sched-ticket-note">날짜 카드를 클릭하면 예매 사이트로 이동합니다. (진행 중·종료된 경기는 네이버 스포츠 중계/결과 페이지로 이동합니다.)</div>
       <div class="sched-head">
         <button type="button" class="sched-nav-btn" data-sched-nav="prev" ${canPrev ? "" : "disabled"} aria-label="이전 달">◀</button>
@@ -1665,7 +1666,7 @@ const renderLatestNewsSection = (g) => {
 
   return `
     <section class="news-section">
-      <h2 class="cmp-title">최신 뉴스</h2>
+      <h2 class="cmp-title">한화 이글스 최신 뉴스</h2>
       <div class="news-grid">
         ${cards || `<div class="news-empty">최신 뉴스를 불러오지 못했습니다.</div>`}
       </div>
@@ -2231,16 +2232,227 @@ const renderLeagueProbableSection = (g) => {
   `;
 };
 
+const renderPostseasonTeamCard = (info, sideLabel) => {
+  const name = info?.team_name || "-";
+  const emblem = info?.emblem || "";
+  const undecided = Boolean(info?.undecided);
+  const rankText = !undecided && info?.rank ? `정규시즌 ${info.rank}위` : "";
+  const record = undecided ? "" : (info?.season_record || [
+    info?.wins !== undefined && info?.wins !== "" ? `${info.wins}승` : "",
+    info?.losses !== undefined && info?.losses !== "" ? `${info.losses}패` : "",
+    info?.draws !== undefined && info?.draws !== "" ? `${info.draws}무` : "",
+  ].filter(Boolean).join(" "));
+  const rate = !undecided && info?.win_rate && info.win_rate !== "-" ? `승률 ${info.win_rate}` : "";
+  return `
+    <article class="ps-team-card">
+      ${emblem ? `<img src="${escapeHtml(emblem)}" alt="${escapeHtml(name)} 엠블럼" class="ps-team-emblem" loading="lazy" />` : ""}
+      <div class="ps-team-side">${escapeHtml(sideLabel)}</div>
+      <h3 class="ps-team-name">${escapeHtml(name)}</h3>
+      ${undecided ? `<div class="ps-team-meta">남은 경기 후 확정</div>` : ""}
+      ${rankText ? `<div class="ps-team-meta">${escapeHtml(rankText)}</div>` : ""}
+      ${record ? `<div class="ps-team-record">${escapeHtml(record)}</div>` : ""}
+      ${rate ? `<div class="ps-team-meta">${escapeHtml(rate)}</div>` : ""}
+    </article>
+  `;
+};
+
+const renderPostseasonLayout = (g) => {
+  const series = String(g?.postseason_series || "").toLowerCase();
+  const seriesClass = series ? `sched-ps-${series}` : "";
+  return `
+    <div class="game-meta-cols game-meta-cols--ps">
+      <div class="row"><span class="label">시리즈:</span><strong class="ps-series-name row-value ${seriesClass}">${escapeHtml(g.postseason_label || "-")}</strong></div>
+      <div class="row"><span class="label">경기일:</span><span class="row-value">${formatGameDateWithWeekday(g.game_date, g.game_date_ymd)}</span></div>
+      <div class="row"><span class="label">경기시간:</span><span class="row-value">${escapeHtml(g.game_time || "-")}</span></div>
+      ${renderMatchupRow(g)}
+      <div class="row"><span class="label">구장:</span><span class="row-value">${escapeHtml(g.stadium || "-")}</span></div>
+    </div>
+    <div class="game-pitcher-cols sub">
+      <div class="ps-team-grid">
+        ${renderPostseasonTeamCard(g.away_team_info, "원정")}
+        ${renderPostseasonTeamCard(g.home_team_info, "홈")}
+      </div>
+    </div>
+  `;
+};
+
+const renderPostseasonComparison = (g) => {
+  const away = g?.away_team_info || {};
+  const home = g?.home_team_info || {};
+  const h2h = g?.head_to_head_summary || {};
+  const pairOpen = Boolean(away.undecided || home.undecided);
+  const cell = (text, pending) => escapeHtml(pending ? "확정 전" : (text || "-"));
+  const teamHead = (info) => {
+    const name = info?.team_name || "-";
+    const emblem = info?.emblem || "";
+    return `
+      <th class="cmp-team">
+        ${emblem ? `<img src="${escapeHtml(emblem)}" alt="${escapeHtml(name)}" class="emblem" />` : ""}
+        <span>${escapeHtml(name)}</span>
+      </th>
+    `;
+  };
+  const statRow = (label, awayText, awayPending, homeText, homePending) => `
+    <tr>
+      <td class="cmp-val">${cell(awayText, awayPending)}</td>
+      <td class="cmp-label">${escapeHtml(label)}</td>
+      <td class="cmp-val">${cell(homeText, homePending)}</td>
+    </tr>
+  `;
+  const rateText = (info) => (info?.win_rate && info.win_rate !== "-" ? info.win_rate : "");
+  return `
+    <section class="cmp-section">
+      <h2 class="cmp-title">양팀 전적</h2>
+      <table class="cmp-table">
+        <thead>
+          <tr>
+            ${teamHead(away)}
+            <th class="cmp-label-head"></th>
+            ${teamHead(home)}
+          </tr>
+        </thead>
+        <tbody>
+          ${statRow("상대전적(시즌)", h2h.away_vs_home, pairOpen, h2h.home_vs_away, pairOpen)}
+          ${statRow("시즌 성적", away.season_record, away.undecided, home.season_record, home.undecided)}
+          ${statRow("승률", rateText(away), away.undecided, rateText(home), home.undecided)}
+          ${statRow("마지막 10경기", away.last10, away.undecided, home.last10, home.undecided)}
+        </tbody>
+      </table>
+    </section>
+  `;
+};
+
+const POSTSEASON_TEAM_TONE = {
+  HH: "hh",
+  OB: "ob",
+  SS: "ss",
+  LT: "lt",
+  SK: "sk",
+  WO: "wo",
+  LG: "lg",
+  KT: "kt",
+  HT: "ht",
+  NC: "nc",
+};
+
+const alignPostseasonBracket = () => {
+  const scroller = document.querySelector(".ps-bracket-scroll");
+  const current = scroller?.querySelector(".ps-bracket-col--current");
+  if (!scroller || !current) return;
+  if (!window.matchMedia("(max-width: 767px)").matches) return;
+  const scrollerRect = scroller.getBoundingClientRect();
+  const colRect = current.getBoundingClientRect();
+  const fullyVisible = colRect.left >= scrollerRect.left - 1 && colRect.right <= scrollerRect.right + 1;
+  if (fullyVisible) return;
+  const delta = colRect.left - scrollerRect.left + scroller.scrollLeft;
+  scroller.scrollLeft = Math.max(0, delta - 4);
+};
+
+const renderPostseasonBracket = (g) => {
+  const bracket = g?.postseason_bracket;
+  const rounds = Array.isArray(bracket?.rounds) ? bracket.rounds : [];
+  if (rounds.length === 0) return "";
+  const sid = String(g?.season_id || "").trim();
+  const shortPendingName = {
+    "와일드카드 승자": "WC 승자",
+    "준플레이오프 승자": "준PO 승자",
+    "플레이오프 승자": "PO 승자",
+  };
+  const teamRow = (info, caption, wins, isWinner) => {
+    const rawName = info?.team_name || "미정";
+    const name = shortPendingName[rawName] || rawName;
+    const emblem = info?.emblem || "";
+    return `
+      <div class="ps-bracket-team${isWinner ? " ps-bracket-team--winner" : ""}">
+        ${emblem
+          ? `<img class="ps-bracket-emblem" src="${escapeHtml(emblem)}" alt="" />`
+          : `<span class="ps-bracket-emblem-slot" aria-hidden="true"></span>`}
+        ${caption ? `<span class="ps-bracket-caption">${escapeHtml(caption)}</span>` : ""}
+        <span class="ps-bracket-name">${escapeHtml(name)}</span>
+        <span class="ps-bracket-wins">${escapeHtml(String(wins))}승</span>
+      </div>
+    `;
+  };
+  const gameChip = (row) => {
+    const status = String(row?.status || "예정");
+    const roundLabel = row?.round_label || (row?.game_no ? `${row.game_no}차전` : "경기");
+    const hasScore = row?.away_score !== "" && row?.away_score != null && row?.home_score !== "" && row?.home_score != null;
+    const dt = parseYmdAsLocalDate(row?.date || "");
+    const when = dt ? `${dt.getMonth() + 1}/${dt.getDate()}` : "";
+    const score = hasScore ? `${row.away_score}-${row.home_score}` : "";
+    let text = roundLabel;
+    if (status === "종료") text = [roundLabel, when, score || "종료"].filter(Boolean).join(" ");
+    else if (status === "진행중") text = [roundLabel, when, score || "진행"].filter(Boolean).join(" ");
+    else if (status === "미진행") text = `${roundLabel} 미진행`;
+    else if (status === "취소" || status === "미개최") text = `${roundLabel} ${status}`;
+    else if (when) text = `${roundLabel} ${when}`;
+    const classes = ["ps-bracket-game"];
+    if (status === "종료") classes.push("ps-bracket-game--final");
+    else if (status === "진행중") classes.push("ps-bracket-game--live");
+    else if (status === "미진행" || status === "취소" || status === "미개최") classes.push("ps-bracket-game--skip");
+    const link = status === "종료" || status === "진행중" ? getNaverGameRelayUrl(row, row?.season_id || sid) : "";
+    const title = [row?.date, row?.game_time, row?.stadium, status].filter(Boolean).join(" ");
+    if (link) {
+      return `<a class="${classes.join(" ")}" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(title)}">${escapeHtml(text)}</a>`;
+    }
+    return `<span class="${classes.join(" ")}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+  };
+  const columns = rounds.map((rnd, index) => {
+    const series = String(rnd?.series || "").toLowerCase();
+    const higherWins = rnd?.winner_side === "higher";
+    const lowerWins = rnd?.winner_side === "lower";
+    const games = Array.isArray(rnd?.games) ? rnd.games : [];
+    const winner = higherWins ? rnd?.higher : lowerWins ? rnd?.lower : null;
+    const tone = POSTSEASON_TEAM_TONE[String(winner?.team_id || "").trim()] || "";
+    const statusLabel = String(rnd?.status_label || "");
+    const emphasized = Boolean(rnd?.is_current) || statusLabel === "진행중";
+    const current = rnd?.is_current ? " ps-bracket-col--current" : "";
+    const toneClass = tone ? ` ps-bracket-col--team-${tone}` : "";
+    const muted = emphasized ? "" : " ps-bracket-col--muted";
+    const lineToNext = index < rounds.length - 1 ? " ps-bracket-col--linked" : "";
+    return `
+      <div class="ps-bracket-col ps-bracket-col--${escapeHtml(series)}${toneClass}${current}${muted}${lineToNext}">
+        <article class="ps-bracket-card">
+          <div class="ps-bracket-head">
+            <span class="ps-bracket-series sched-ps-${escapeHtml(series)}">${escapeHtml(rnd?.label || "")}</span>
+            <span class="ps-bracket-state">${escapeHtml(rnd?.status_label || "")}</span>
+          </div>
+          <div class="ps-bracket-teams">
+            ${teamRow(rnd?.higher, rnd?.higher_caption, rnd?.higher_wins ?? 0, higherWins)}
+            ${teamRow(rnd?.lower, rnd?.lower_caption, rnd?.lower_wins ?? 0, lowerWins)}
+          </div>
+          ${rnd?.advance_rule ? `<p class="ps-bracket-rule">${escapeHtml(rnd.advance_rule)}</p>` : ""}
+          <div class="ps-bracket-games">${games.map(gameChip).join("")}</div>
+        </article>
+      </div>
+    `;
+  }).join("");
+  return `
+    <section class="ps-bracket">
+      <h2 class="cmp-title">가을야구 대진표</h2>
+      <div class="ps-bracket-scroll">
+        <div class="ps-bracket-board">
+          ${columns}
+        </div>
+      </div>
+    </section>
+  `;
+};
+
 const renderGame = (g, refreshedAt) => {
+  const pageTitle = document.querySelector("main.card > h1");
+  if (pageTitle) {
+    pageTitle.textContent = g?.is_postseason ? "가을야구 경기정보" : "한화 이글스 경기정보";
+  }
   if (!g) {
     container.innerHTML = "<p>가까운 일정에서 한화 이글스 경기 정보를 찾지 못했습니다.</p>";
     return;
   }
+  if (g.is_postseason && g.postseason_label) {
+    document.title = `${g.postseason_label} ${g.matchup || ""}`.trim();
+  }
 
-  container.innerHTML = `
-    <div class="updated-at">마지막 갱신: ${formatUpdatedAt(refreshedAt)}</div>
-    ${renderLiveHeader(g)}
-    <div class="game-meta-pitcher-layout">
+  const regularMeta = `
       <div class="game-meta-cols">
         <div class="row"><span class="label">경기일:</span>${formatGameDateWithWeekday(g.game_date, g.game_date_ymd)}</div>
         <div class="row"><span class="label">경기시간:</span>${g.game_time}</div>
@@ -2266,23 +2478,32 @@ const renderGame = (g, refreshedAt) => {
         )}
         </div>
       </div>
+  `;
+
+  container.innerHTML = `
+    <div class="updated-at">마지막 갱신: ${formatUpdatedAt(refreshedAt)}</div>
+    ${g.is_postseason ? "" : renderLiveHeader(g)}
+    <div class="game-meta-pitcher-layout">
+      ${g.is_postseason ? renderPostseasonLayout(g) : regularMeta}
     </div>
     ${renderWeatherSection(g)}
-    ${renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary, g)}
-    ${renderLeagueProbableSection(g)}
-    ${renderLeagueResultsSection(g)}
-    ${renderLineupSection(g)}
-    ${renderRegisterMoveSection(g)}
-    ${renderPlayoffRaceSection(g)}
+    ${g.is_postseason ? renderPostseasonComparison(g) : renderTeamComparison(g.team_comparison, g.away_team, g.home_team, g.head_to_head_summary, g)}
+    ${g.is_postseason ? "" : renderLeagueProbableSection(g)}
+    ${g.is_postseason ? "" : renderLeagueResultsSection(g)}
+    ${g.is_postseason ? "" : renderLineupSection(g)}
+    ${g.is_postseason ? "" : renderRegisterMoveSection(g)}
+    ${g.is_postseason ? "" : renderPlayoffRaceSection(g)}
+    ${g.is_postseason ? renderPostseasonBracket(g) : ""}
     ${renderPlayerHighlightsSection(g)}
     ${renderSeriesSection(g)}
-    ${renderEaglesTvSection(g)}
+    ${g.is_postseason ? "" : renderEaglesTvSection(g)}
     ${renderLatestNewsSection(g)}
     ${renderTeamRankings(g.team_rankings, g.team_rank_date)}
   `;
   bindScheduleCalendarEvents();
   bindSunShadowEvents();
   bindWeatherChartEvents();
+  alignPostseasonBracket();
 };
 
 const shouldStartPolling = (g) => {

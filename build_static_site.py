@@ -242,7 +242,18 @@ def build() -> None:
     has_game = bool(game_info)
     updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 
-    if has_game:
+    if has_game and game_info.get("is_postseason"):
+        og_title = f"{game_info.get('postseason_label') or '가을야구'} {game_info.get('matchup') or ''}".strip()
+        og_description = " ".join(
+            part
+            for part in (
+                str(game_info.get("game_date") or ""),
+                str(game_info.get("game_time") or ""),
+                str(game_info.get("stadium") or ""),
+            )
+            if part
+        )
+    elif has_game:
         og_title = f"{game_info['game_date']} {game_info['matchup']}"
         og_description = f"{game_info['away_team']} : {game_info['away_starter']} / {game_info['home_team']} : {game_info['home_starter']}"
     else:

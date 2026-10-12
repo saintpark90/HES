@@ -1044,6 +1044,8 @@ def ensure_game_starters_from_namu(game_info: Dict[str, Any]) -> Dict[str, Any]:
     """Last-chance Namu refill before writing static output when starters are still TBD."""
     if not isinstance(game_info, dict) or not game_info:
         return game_info
+    if game_info.get("is_postseason"):
+        return game_info
 
     away_starter = str(game_info.get("away_starter") or "").strip()
     home_starter = str(game_info.get("home_starter") or "").strip()
@@ -5003,6 +5005,819 @@ def _fetch_hanwha_player_highlights(season_id: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
+# script.js KBO_POSTSEASON_2026 과 같은 일정. 미디어데이·이동일은 경기가 아니다.
+KBO_POSTSEASON_2026 = [
+    {"date": "2026-10-13", "series": "WC", "kind": "off", "note": "미디어데이"},
+    {"date": "2026-10-14", "series": "WC", "kind": "game", "game": 1, "time": "18:30"},
+    {"date": "2026-10-15", "series": "WC", "kind": "game", "game": 2, "time": "18:30"},
+    {"date": "2026-10-16", "series": "SPO", "kind": "off", "note": "미디어데이"},
+    {"date": "2026-10-17", "series": "SPO", "kind": "game", "game": 1, "time": "14:00"},
+    {"date": "2026-10-18", "series": "SPO", "kind": "game", "game": 2, "time": "14:00"},
+    {"date": "2026-10-19", "series": "SPO", "kind": "off", "note": "이동일"},
+    {"date": "2026-10-20", "series": "SPO", "kind": "game", "game": 3, "time": "18:30"},
+    {"date": "2026-10-21", "series": "SPO", "kind": "game", "game": 4, "time": "18:30"},
+    {"date": "2026-10-22", "series": "SPO", "kind": "off", "note": "이동일"},
+    {"date": "2026-10-23", "series": "SPO", "kind": "game", "game": 5, "time": "18:30"},
+    {"date": "2026-10-24", "series": "PO", "kind": "off", "note": "미디어데이"},
+    {"date": "2026-10-25", "series": "PO", "kind": "game", "game": 1, "time": "14:00"},
+    {"date": "2026-10-26", "series": "PO", "kind": "game", "game": 2, "time": "18:30"},
+    {"date": "2026-10-27", "series": "PO", "kind": "off", "note": "이동일"},
+    {"date": "2026-10-28", "series": "PO", "kind": "game", "game": 3, "time": "18:30"},
+    {"date": "2026-10-29", "series": "PO", "kind": "game", "game": 4, "time": "18:30"},
+    {"date": "2026-10-30", "series": "PO", "kind": "off", "note": "이동일"},
+    {"date": "2026-10-31", "series": "PO", "kind": "game", "game": 5, "time": "14:00"},
+    {"date": "2026-11-01", "series": "KS", "kind": "off", "note": "미디어데이"},
+    {"date": "2026-11-02", "series": "KS", "kind": "game", "game": 1, "time": "18:30"},
+    {"date": "2026-11-03", "series": "KS", "kind": "game", "game": 2, "time": "18:30"},
+    {"date": "2026-11-04", "series": "KS", "kind": "off", "note": "이동일"},
+    {"date": "2026-11-05", "series": "KS", "kind": "game", "game": 3, "time": "18:30"},
+    {"date": "2026-11-06", "series": "KS", "kind": "game", "game": 4, "time": "18:30"},
+    {"date": "2026-11-07", "series": "KS", "kind": "game", "game": 5, "time": "14:00"},
+    {"date": "2026-11-08", "series": "KS", "kind": "off", "note": "이동일"},
+    {"date": "2026-11-09", "series": "KS", "kind": "game", "game": 6, "time": "18:30"},
+    {"date": "2026-11-10", "series": "KS", "kind": "game", "game": 7, "time": "18:30"},
+]
+
+# 상위 시드 홈 차전. 와일드카드는 전 경기 4위 홈(4위 1승·5위 2승), 준PO·PO는 3선승 2-2-1, 한국시리즈는 4선승 2-3-2.
+_POSTSEASON_SERIES = {
+    "WC": {
+        "label": "와일드카드",
+        "higher_rank": 4,
+        "lower_rank": 5,
+        "lower_pending": "",
+        "higher_home_games": {1, 2},
+        "higher_wins_needed": 1,
+        "lower_wins_needed": 2,
+    },
+    "SPO": {
+        "label": "준플레이오프",
+        "higher_rank": 3,
+        "lower_rank": None,
+        "lower_pending": "와일드카드 승자",
+        "higher_home_games": {1, 2, 5},
+        "higher_wins_needed": 3,
+        "lower_wins_needed": 3,
+    },
+    "PO": {
+        "label": "플레이오프",
+        "higher_rank": 2,
+        "lower_rank": None,
+        "lower_pending": "준플레이오프 승자",
+        "higher_home_games": {1, 2, 5},
+        "higher_wins_needed": 3,
+        "lower_wins_needed": 3,
+    },
+    "KS": {
+        "label": "한국시리즈",
+        "higher_rank": 1,
+        "lower_rank": None,
+        "lower_pending": "플레이오프 승자",
+        "higher_home_games": {1, 2, 6, 7},
+        "higher_wins_needed": 4,
+        "lower_wins_needed": 4,
+    },
+}
+_SERIES_ORDER = ("WC", "SPO", "PO", "KS")
+_PREVIOUS_SERIES = {"SPO": "WC", "PO": "SPO", "KS": "PO"}
+
+_TEAM_HOME_STADIUM = {
+    "HH": "대전 한화생명볼파크",
+    "OB": "서울 잠실야구장",
+    "SS": "대구 삼성라이온즈파크",
+    "LT": "부산 사직야구장",
+    "SK": "인천 문학 SSG 랜더스필드",
+    "WO": "서울 고척스카이돔",
+    "LG": "서울 잠실야구장",
+    "KT": "수원 KT위즈파크",
+    "HT": "광주 챔피언스 필드",
+    "NC": "창원 NC파크",
+}
+
+_SEASON_GAME_COUNT = 144
+
+
+def _postseason_emblem_url(team_id: str, season: str) -> str:
+    tid = str(team_id or "").strip()
+    if not tid:
+        return ""
+    return f"{KBO_EMBLEM_BASE}/{season}/emblem_{tid}.png"
+
+
+def _ranking_row(rankings: list, *, rank: Optional[int] = None, team_id: str = "", team_name: str = "") -> Optional[dict]:
+    if rank is not None:
+        for row in rankings:
+            try:
+                if int(str(row.get("rank") or "")) == int(rank):
+                    return row
+            except (TypeError, ValueError):
+                continue
+    tid = str(team_id or "").strip()
+    if tid:
+        for row in rankings:
+            if str(row.get("team_id") or "").strip() == tid:
+                return row
+    name = str(team_name or "").strip()
+    if name:
+        for row in rankings:
+            if str(row.get("team_name") or "").strip() == name:
+                return row
+    return None
+
+
+def _season_record_text(info: Dict[str, Any]) -> str:
+    wins = str(info.get("wins") or "")
+    losses = str(info.get("losses") or "")
+    draws = str(info.get("draws") or "")
+    if not wins and not losses:
+        return ""
+    return f"{wins}승 {losses}패 {draws}무".strip()
+
+
+def _team_info_from_ranking(row: Optional[dict], *, fallback_name: str, season: str, team_id: str = "") -> Dict[str, Any]:
+    if not row:
+        tid = str(team_id or "").strip()
+        return {
+            "team_name": fallback_name or "미정",
+            "team_id": tid,
+            "rank": "",
+            "wins": "",
+            "losses": "",
+            "draws": "",
+            "win_rate": "",
+            "last10": "",
+            "emblem": _postseason_emblem_url(tid, season),
+            "undecided": not tid and not fallback_name,
+            "season_record": "",
+        }
+    tid = str(row.get("team_id") or team_id or "").strip()
+    emblem = str(row.get("emblem") or "").strip() or _postseason_emblem_url(tid, season)
+    info = {
+        "team_name": str(row.get("team_name") or fallback_name or "미정"),
+        "team_id": tid,
+        "rank": str(row.get("rank") or ""),
+        "wins": str(row.get("wins") or ""),
+        "losses": str(row.get("losses") or ""),
+        "draws": str(row.get("draws") or ""),
+        "win_rate": str(row.get("win_rate") or ""),
+        "last10": str(row.get("last10") or ""),
+        "emblem": emblem,
+        "undecided": False,
+    }
+    info["season_record"] = _season_record_text(info)
+    return info
+
+
+def _stadium_for_team(team_id: str, team_name: str) -> str:
+    base = _TEAM_HOME_STADIUM.get(str(team_id or "").strip(), "")
+    if not base:
+        return ""
+    if team_id in {"LG", "OB"} and team_name:
+        return f"{base} ({team_name} 홈)"
+    return base
+
+
+def _format_postseason_date(target: date) -> str:
+    weekday = "월화수목금토일"[target.weekday()]
+    return f"{target.month}.{target.day}({weekday})"
+
+
+def _stat_int(row: dict, key: str) -> int:
+    try:
+        return int(str(row.get(key) or "0").strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _remaining_games(row: dict) -> int:
+    return max(0, _SEASON_GAME_COUNT - _stat_int(row, "games"))
+
+
+def _win_rate_value(wins: int, losses: int) -> float:
+    total = wins + losses
+    if total <= 0:
+        return 0.0
+    return wins / total
+
+
+def _can_finish_ahead(challenger: dict, other: dict) -> bool:
+    """남은 경기를 모두 반영해도 challenger가 other보다 앞설 수 있는지."""
+    challenger_wins = _stat_int(challenger, "wins") + _remaining_games(challenger)
+    other_wins = _stat_int(other, "wins")
+    if challenger_wins > other_wins:
+        return True
+    if challenger_wins < other_wins:
+        return False
+    challenger_rate = _win_rate_value(
+        _stat_int(challenger, "wins") + _remaining_games(challenger),
+        _stat_int(challenger, "losses"),
+    )
+    other_rate = _win_rate_value(
+        _stat_int(other, "wins"),
+        _stat_int(other, "losses") + _remaining_games(other),
+    )
+    return challenger_rate > other_rate
+
+
+def _teams_that_can_finish_at_rank(rankings: list, rank: int) -> list:
+    teams = [row for row in rankings if isinstance(row, dict) and str(row.get("rank") or "").isdigit()]
+    found: list = []
+    for team in teams:
+        must_ahead = 0
+        can_ahead = 0
+        for other in teams:
+            if other is team:
+                continue
+            team_can = _can_finish_ahead(team, other)
+            other_can = _can_finish_ahead(other, team)
+            if other_can and not team_can:
+                must_ahead += 1
+            if other_can:
+                can_ahead += 1
+        best_rank = 1 + must_ahead
+        worst_rank = 1 + can_ahead
+        if best_rank <= rank <= worst_rank:
+            found.append(team)
+    return found
+
+
+def _pending_postseason_team(name: str, *, rank: str = "") -> Dict[str, Any]:
+    return {
+        "team_name": name or "미정",
+        "team_id": "",
+        "rank": rank,
+        "wins": "",
+        "losses": "",
+        "draws": "",
+        "win_rate": "",
+        "last10": "",
+        "emblem": "",
+        "undecided": True,
+        "season_record": "",
+    }
+
+
+def _resolve_rank_seed(rankings: list, rank: int, season: str) -> Dict[str, Any]:
+    """해당 순위가 남은 경기로도 한 팀으로 잠길 때만 구단명을 쓴다."""
+    candidates = _teams_that_can_finish_at_rank(rankings, rank)
+    if len(candidates) == 1:
+        info = _team_info_from_ranking(candidates[0], fallback_name=f"{rank}위팀", season=season)
+        info["undecided"] = False
+        info["season_record"] = _season_record_text(info)
+        return info
+    return _pending_postseason_team(f"{rank}위팀", rank=str(rank))
+
+
+def _format_h2h_cell(value: str) -> str:
+    matched = re.fullmatch(r"(\d+)-(\d+)-(\d+)", str(value or "").strip())
+    if not matched:
+        return ""
+    return f"{matched.group(1)}승 {matched.group(2)}패 {matched.group(3)}무"
+
+
+def _pair_head_to_head(rows: list, away_info: Dict[str, Any], home_info: Dict[str, Any]) -> Dict[str, str]:
+    if away_info.get("undecided") or home_info.get("undecided"):
+        return {"away_vs_home": "", "home_vs_away": ""}
+    raw = _find_head_to_head_record(
+        rows,
+        str(away_info.get("team_name") or ""),
+        str(home_info.get("team_name") or ""),
+    )
+    return {
+        "away_vs_home": _format_h2h_cell(str(raw.get("away_vs_home") or "")),
+        "home_vs_away": _format_h2h_cell(str(raw.get("home_vs_away") or "")),
+    }
+
+
+def _series_row_from_api_game(game: Dict[str, Any]) -> Dict[str, str]:
+    away_score = str(game.get("T_SCORE_CN") or "").strip()
+    home_score = str(game.get("B_SCORE_CN") or "").strip()
+    if _is_cancelled_game(game):
+        return {
+            "status": "취소",
+            "result": _game_cancel_label(game) or "취소",
+            "away_score": away_score,
+            "home_score": home_score,
+        }
+    if _is_live_game(game):
+        return {"status": "진행중", "result": "진행중", "away_score": away_score, "home_score": home_score}
+    if _is_final_game(game) or _is_finished_game(game):
+        return {
+            "status": "종료",
+            "result": _league_game_outcome_label(game) or "종료",
+            "away_score": away_score,
+            "home_score": home_score,
+        }
+    return {"status": "예정", "result": "", "away_score": "", "home_score": ""}
+
+
+def _pick_series_api_game(games: list, away_id: str, home_id: str) -> Optional[Dict[str, Any]]:
+    usable = [game for game in games if not _is_cancelled_game(game)] or list(games)
+    if away_id and home_id:
+        for game in usable:
+            if str(game.get("AWAY_ID") or "") == away_id and str(game.get("HOME_ID") or "") == home_id:
+                return game
+    if away_id or home_id:
+        for game in usable:
+            ids = {str(game.get("AWAY_ID") or ""), str(game.get("HOME_ID") or "")}
+            if away_id in ids or home_id in ids:
+                return game
+    return usable[0] if usable else None
+
+
+def _home_away_for_game(item: dict, higher_info: Dict[str, Any], lower_info: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any], str, bool]:
+    meta = _POSTSEASON_SERIES.get(str(item.get("series") or ""), {})
+    game_no = int(item.get("game") or 0)
+    higher_is_home = game_no in set(meta.get("higher_home_games") or [])
+    if higher_is_home:
+        home_info, away_info = higher_info, lower_info
+    else:
+        home_info, away_info = lower_info, higher_info
+    away_info = dict(away_info)
+    home_info = dict(home_info)
+    if home_info.get("undecided"):
+        rank = str(home_info.get("rank") or "")
+        stadium = f"{rank}위 팀 홈구장" if rank else "미정"
+    else:
+        stadium = _stadium_for_team(str(home_info.get("team_id") or ""), str(home_info.get("team_name") or "")) or "미정"
+    return away_info, home_info, stadium, higher_is_home
+
+
+def _series_schedule_rows(series: str, higher_info: Dict[str, Any], lower_info: Dict[str, Any], season: str) -> list:
+    rows: list[Dict[str, Any]] = []
+    for item in KBO_POSTSEASON_2026:
+        if str(item.get("series") or "") != series or item.get("kind") != "game":
+            continue
+        try:
+            target = date.fromisoformat(str(item.get("date") or ""))
+        except ValueError:
+            continue
+        away_info, home_info, stadium, higher_is_home = _home_away_for_game(item, higher_info, lower_info)
+        game_no = int(item.get("game") or 0)
+        rows.append(
+            {
+                "date": target.isoformat(),
+                "game_no": game_no,
+                "round_label": f"{game_no}차전" if game_no else "",
+                "game_time": str(item.get("time") or ""),
+                "stadium": stadium,
+                "away_team": str(away_info.get("team_name") or ""),
+                "home_team": str(home_info.get("team_name") or ""),
+                "away_team_id": str(away_info.get("team_id") or ""),
+                "home_team_id": str(home_info.get("team_id") or ""),
+                "away_emblem": str(away_info.get("emblem") or ""),
+                "home_emblem": str(home_info.get("emblem") or ""),
+                "away_team_info": away_info,
+                "home_team_info": home_info,
+                "away_score": "",
+                "home_score": "",
+                "result": "",
+                "status": "예정",
+                "game_id": "",
+                "season_id": season,
+                "is_final": False,
+                "is_live": False,
+                "higher_is_home": higher_is_home,
+                "from_api": False,
+            }
+        )
+    return rows
+
+
+def _apply_api_side(row: dict, picked: Dict[str, Any], side: str, rankings: list, season: str) -> None:
+    prefix = "AWAY" if side == "away" else "HOME"
+    name = str(picked.get(f"{prefix}_NM") or "").strip()
+    team_id = str(picked.get(f"{prefix}_ID") or "").strip()
+    if not name and not team_id:
+        return
+    info = _team_info_from_ranking(
+        _ranking_row(rankings, team_id=team_id, team_name=name),
+        fallback_name=name or str(row.get(f"{side}_team") or ""),
+        season=season,
+        team_id=team_id,
+    )
+    if name:
+        info["team_name"] = name
+    info["undecided"] = False
+    info["season_record"] = _season_record_text(info)
+    row[f"{side}_team"] = str(info.get("team_name") or "")
+    row[f"{side}_team_id"] = str(info.get("team_id") or "")
+    row[f"{side}_emblem"] = str(info.get("emblem") or "")
+    row[f"{side}_team_info"] = info
+
+
+def _refresh_series_row_from_api(row: dict, rankings: list, today: date, season: str, higher_info: Dict[str, Any]) -> bool:
+    try:
+        target = date.fromisoformat(str(row.get("date") or ""))
+    except ValueError:
+        return False
+    try:
+        api_games = _fetch_games(target)
+    except Exception:
+        api_games = []
+    picked = _pick_series_api_game(api_games, str(row.get("away_team_id") or ""), str(row.get("home_team_id") or ""))
+    if not picked:
+        if target < today and str(row.get("status") or "") == "예정":
+            row["status"] = "미개최"
+        return False
+    applied = _series_row_from_api_game(picked)
+    row.update(applied)
+    row["from_api"] = True
+    row["game_id"] = str(picked.get("G_ID") or "")
+    row["season_id"] = str(picked.get("SEASON_ID") or season)
+    row["is_final"] = applied["status"] == "종료"
+    row["is_live"] = applied["status"] == "진행중"
+    api_time = str(picked.get("G_TM") or "").strip()
+    api_stadium = str(picked.get("S_NM") or "").strip()
+    if api_time:
+        row["game_time"] = api_time
+    if api_stadium:
+        row["stadium"] = api_stadium
+    _apply_api_side(row, picked, "away", rankings, season)
+    _apply_api_side(row, picked, "home", rankings, season)
+    higher_id = str((higher_info or {}).get("team_id") or "")
+    if higher_id and higher_id == str(row.get("home_team_id") or ""):
+        row["higher_is_home"] = True
+    elif higher_id and higher_id == str(row.get("away_team_id") or ""):
+        row["higher_is_home"] = False
+    return True
+
+
+def _game_win_side(row: dict) -> str:
+    if str(row.get("status") or "") != "종료":
+        return ""
+    result = str(row.get("result") or "")
+    higher_is_home = bool(row.get("higher_is_home"))
+    if result == "무":
+        return ""
+    if result == "홈승":
+        return "higher" if higher_is_home else "lower"
+    if result == "원정승":
+        return "lower" if higher_is_home else "higher"
+    try:
+        away_score = int(str(row.get("away_score")).strip())
+        home_score = int(str(row.get("home_score")).strip())
+    except (TypeError, ValueError):
+        return ""
+    if home_score > away_score:
+        return "higher" if higher_is_home else "lower"
+    if away_score > home_score:
+        return "lower" if higher_is_home else "higher"
+    return ""
+
+
+def _tally_series(games: list, higher_needed: int, lower_needed: int) -> tuple[int, int, str]:
+    """차전 순서대로 승수를 세고, 시리즈가 끝나면 남은 예정 경기는 미진행으로 둔다."""
+    higher_wins = 0
+    lower_wins = 0
+    winner_side = ""
+    for row in games:
+        if winner_side:
+            if str(row.get("status") or "") == "예정":
+                row["status"] = "미진행"
+                row["result"] = ""
+                row["away_score"] = ""
+                row["home_score"] = ""
+                row["is_final"] = False
+                row["is_live"] = False
+            continue
+        side = _game_win_side(row)
+        if side == "higher":
+            higher_wins += 1
+        elif side == "lower":
+            lower_wins += 1
+        if higher_wins >= higher_needed:
+            winner_side = "higher"
+        elif lower_wins >= lower_needed:
+            winner_side = "lower"
+    return higher_wins, lower_wins, winner_side
+
+
+def _team_caption(info: Dict[str, Any]) -> str:
+    if info.get("undecided"):
+        return ""
+    rank = str(info.get("rank") or "").strip()
+    return f"정규 {rank}위" if rank else ""
+
+
+def _apply_round_labels(rnd: dict, meta: dict) -> None:
+    higher = rnd.get("higher") or {}
+    lower = rnd.get("lower") or {}
+    series = str(rnd.get("series") or "")
+    rnd["higher_caption"] = _team_caption(higher)
+    if series == "WC":
+        rnd["lower_caption"] = _team_caption(lower)
+    elif lower.get("undecided"):
+        rnd["lower_caption"] = ""
+    else:
+        rnd["lower_caption"] = str(meta.get("lower_pending") or "")
+    if series == "WC":
+        rnd["advance_rule"] = "4위 1승 · 5위 2승"
+    else:
+        rnd["advance_rule"] = f"{int(meta.get('higher_wins_needed') or 0)}선승"
+    games = rnd.get("games") or []
+    if rnd.get("winner_side"):
+        rnd["status_label"] = "우승" if series == "KS" else "진출"
+    elif any(str(game.get("status") or "") in {"진행중", "종료"} for game in games):
+        rnd["status_label"] = "진행중"
+    else:
+        rnd["status_label"] = "예정"
+
+
+def _rename_open_games(rnd: dict) -> None:
+    higher = rnd.get("higher") or {}
+    lower = rnd.get("lower") or {}
+    for game in rnd.get("games") or []:
+        if game.get("from_api"):
+            continue
+        if str(game.get("status") or "") in {"종료", "진행중", "취소"}:
+            continue
+        if game.get("higher_is_home"):
+            away_info, home_info = dict(lower), dict(higher)
+        else:
+            away_info, home_info = dict(higher), dict(lower)
+        game["away_team"] = str(away_info.get("team_name") or "")
+        game["home_team"] = str(home_info.get("team_name") or "")
+        game["away_team_id"] = str(away_info.get("team_id") or "")
+        game["home_team_id"] = str(home_info.get("team_id") or "")
+        game["away_emblem"] = str(away_info.get("emblem") or "")
+        game["home_emblem"] = str(home_info.get("emblem") or "")
+        game["away_team_info"] = away_info
+        game["home_team_info"] = home_info
+        if home_info.get("undecided"):
+            rank = str(home_info.get("rank") or "")
+            game["stadium"] = f"{rank}위 팀 홈구장" if rank else "미정"
+        else:
+            game["stadium"] = _stadium_for_team(
+                str(home_info.get("team_id") or ""),
+                str(home_info.get("team_name") or ""),
+            ) or "미정"
+
+
+def _lift_api_teams(rnd: dict) -> None:
+    """공식 일정이 올라온 시리즈는 시드가 비어 있어도 그 대진의 구단을 쓴다."""
+    higher = dict(rnd.get("higher") or {})
+    lower = dict(rnd.get("lower") or {})
+    lifted = False
+    for game in rnd.get("games") or []:
+        if not game.get("from_api"):
+            continue
+        if game.get("higher_is_home"):
+            api_higher = game.get("home_team_info") or {}
+            api_lower = game.get("away_team_info") or {}
+        else:
+            api_higher = game.get("away_team_info") or {}
+            api_lower = game.get("home_team_info") or {}
+        if higher.get("undecided") and str(api_higher.get("team_id") or "").strip():
+            higher = dict(api_higher)
+            higher["undecided"] = False
+            lifted = True
+        if lower.get("undecided") and str(api_lower.get("team_id") or "").strip():
+            lower = dict(api_lower)
+            lower["undecided"] = False
+            lifted = True
+        break
+    if not lifted:
+        return
+    rnd["higher"] = higher
+    rnd["lower"] = lower
+    _rename_open_games(rnd)
+
+
+def _close_round(rnd: dict) -> str:
+    meta = _POSTSEASON_SERIES.get(str(rnd.get("series") or ""), {})
+    higher_wins, lower_wins, winner_side = _tally_series(
+        list(rnd.get("games") or []),
+        int(meta.get("higher_wins_needed") or 1),
+        int(meta.get("lower_wins_needed") or 1),
+    )
+    rnd["higher_wins"] = higher_wins
+    rnd["lower_wins"] = lower_wins
+    rnd["winner_side"] = winner_side
+    _apply_round_labels(rnd, meta)
+    return winner_side
+
+
+def _round_winner_team(rnd: dict) -> Optional[Dict[str, Any]]:
+    side = str(rnd.get("winner_side") or "")
+    if side == "higher":
+        return dict(rnd.get("higher") or {})
+    if side == "lower":
+        return dict(rnd.get("lower") or {})
+    return None
+
+
+def _push_winners_forward(rounds: list) -> None:
+    for index, rnd in enumerate(rounds[:-1]):
+        winner = _round_winner_team(rnd)
+        if not winner:
+            continue
+        nxt = rounds[index + 1]
+        if any(game.get("from_api") for game in nxt.get("games") or []):
+            continue
+        if any(str(game.get("status") or "") in {"종료", "진행중"} for game in nxt.get("games") or []):
+            continue
+        winner["undecided"] = False
+        nxt["lower"] = winner
+        _rename_open_games(nxt)
+        meta = _POSTSEASON_SERIES.get(str(nxt.get("series") or ""), {})
+        _apply_round_labels(nxt, meta)
+
+
+def _participants_for_series(series: str, seeds: Dict[int, Dict[str, Any]], winners: Dict[str, Dict[str, Any]]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    meta = _POSTSEASON_SERIES[series]
+    higher = dict(seeds[int(meta["higher_rank"])])
+    lower_rank = meta.get("lower_rank")
+    if lower_rank:
+        lower = dict(seeds[int(lower_rank)])
+    else:
+        prev = _PREVIOUS_SERIES.get(series, "")
+        prev_winner = winners.get(prev)
+        if prev_winner:
+            lower = dict(prev_winner)
+            lower["undecided"] = False
+        else:
+            lower = _pending_postseason_team(str(meta.get("lower_pending") or "상대 미정"))
+    return higher, lower
+
+
+def _pick_open_bracket_game(rounds: list, today: date) -> Optional[tuple]:
+    today_iso = today.isoformat()
+    for rnd in rounds:
+        for game in rnd.get("games") or []:
+            status = str(game.get("status") or "")
+            if status in {"미진행", "취소", "미개최", "종료"}:
+                continue
+            if str(game.get("date") or "") < today_iso:
+                continue
+            return rnd, game
+    return None
+
+
+def _refresh_upcoming_matchup(rounds: list, today: date, rankings: list, season: str) -> None:
+    picked = _pick_open_bracket_game(rounds, today)
+    if not picked:
+        return
+    rnd, game = picked
+    try:
+        target = date.fromisoformat(str(game.get("date") or ""))
+    except ValueError:
+        return
+    if target <= today:
+        return
+    _refresh_series_row_from_api(game, rankings, today, season, rnd.get("higher") or {})
+    _lift_api_teams(rnd)
+    _close_round(rnd)
+    _push_winners_forward(rounds)
+
+
+def _build_postseason_bracket(rankings: list, today: date, season: str) -> Dict[str, Any]:
+    seeds = {rank: _resolve_rank_seed(rankings, rank, season) for rank in range(1, 6)}
+    winners: Dict[str, Dict[str, Any]] = {}
+    rounds: list[Dict[str, Any]] = []
+    for series in _SERIES_ORDER:
+        meta = _POSTSEASON_SERIES[series]
+        higher, lower = _participants_for_series(series, seeds, winners)
+        games = _series_schedule_rows(series, higher, lower, season)
+        for game in games:
+            try:
+                target = date.fromisoformat(str(game.get("date") or ""))
+            except ValueError:
+                continue
+            if target <= today:
+                _refresh_series_row_from_api(game, rankings, today, season, higher)
+        rnd = {
+            "series": series,
+            "label": str(meta.get("label") or series),
+            "higher": higher,
+            "lower": lower,
+            "higher_wins": 0,
+            "lower_wins": 0,
+            "higher_wins_needed": int(meta.get("higher_wins_needed") or 0),
+            "lower_wins_needed": int(meta.get("lower_wins_needed") or 0),
+            "winner_side": "",
+            "games": games,
+            "is_current": False,
+        }
+        _lift_api_teams(rnd)
+        winner_side = _close_round(rnd)
+        if winner_side == "higher":
+            winners[series] = dict(rnd["higher"])
+        elif winner_side == "lower":
+            winners[series] = dict(rnd["lower"])
+        rounds.append(rnd)
+    _refresh_upcoming_matchup(rounds, today, rankings, season)
+    ks = rounds[-1]
+    champion = _round_winner_team(ks) or _pending_postseason_team("미정")
+    if _round_winner_team(ks):
+        champion["undecided"] = False
+    return {"rounds": rounds, "champion": champion}
+
+
+def _fixture_from_bracket_game(
+    rnd: dict,
+    game: dict,
+    head_to_head: Optional[list],
+    season: str,
+) -> Dict[str, Any]:
+    target = date.fromisoformat(str(game.get("date") or ""))
+    away_info = dict(game.get("away_team_info") or {})
+    home_info = dict(game.get("home_team_info") or {})
+    away_name = str(game.get("away_team") or away_info.get("team_name") or "")
+    home_name = str(game.get("home_team") or home_info.get("team_name") or "")
+    label = str(rnd.get("label") or "")
+    round_label = str(game.get("round_label") or "")
+    return {
+        "is_postseason": True,
+        "postseason_series": str(rnd.get("series") or ""),
+        "postseason_series_name": label,
+        "postseason_label": f"{label} {round_label}".strip(),
+        "postseason_source": "schedule" if game.get("game_id") else "standings",
+        "season_id": str(game.get("season_id") or season),
+        "game_id": str(game.get("game_id") or ""),
+        "game_date": _format_postseason_date(target),
+        "game_date_ymd": target.isoformat(),
+        "game_time": str(game.get("game_time") or ""),
+        "stadium": str(game.get("stadium") or "미정"),
+        "home_team": home_name,
+        "away_team": away_name,
+        "matchup": f"{away_name} vs {home_name}".strip(),
+        "away_team_info": away_info,
+        "home_team_info": home_info,
+        "head_to_head_summary": _pair_head_to_head(list(head_to_head or []), away_info, home_info),
+        "team_comparison": {
+            "away_emblem": away_info.get("emblem") or game.get("away_emblem") or "",
+            "home_emblem": home_info.get("emblem") or game.get("home_emblem") or "",
+        },
+        "_target_date": target,
+        "_series_games": list(rnd.get("games") or []),
+        "_bracket_round_series": str(rnd.get("series") or ""),
+    }
+
+
+def _build_postseason_snapshot(
+    *,
+    today: date,
+    rank_daily: Dict[str, Any],
+    eagles_tv: Dict[str, Any],
+    latest_news: list,
+    register_moves: Dict[str, Any],
+    league_results_ymd: str,
+    league_results_games: list,
+) -> Optional[Dict[str, Any]]:
+    rankings = rank_daily.get("rankings", []) if isinstance(rank_daily, dict) else []
+    ranking_rows = rankings if isinstance(rankings, list) else []
+    head_to_head = rank_daily.get("head_to_head") if isinstance(rank_daily, dict) else []
+    season = str(today.year)
+    bracket = _build_postseason_bracket(ranking_rows, today, season)
+    rounds = bracket.get("rounds") or []
+    picked = _pick_open_bracket_game(rounds, today)
+    if picked:
+        rnd, game = picked
+    elif rounds and (rounds[-1].get("games") or []):
+        rnd = rounds[-1]
+        game = rnd["games"][-1]
+    else:
+        return None
+    for item in rounds:
+        item["is_current"] = bool(picked) and item.get("series") == rnd.get("series")
+    fixture = _fixture_from_bracket_game(rnd, game, head_to_head, season)
+    target = fixture.pop("_target_date")
+    series_games = fixture.pop("_series_games")
+    fixture.pop("_bracket_round_series", None)
+    stadium = str(fixture.get("stadium") or "")
+    game_time = str(fixture.get("game_time") or "")
+    try:
+        weather_info = _build_game_weather_info(target, game_time, stadium)
+    except Exception:
+        weather_info = {}
+    season_id = str(fixture.get("season_id") or today.year)
+    try:
+        season_schedule = _get_hanwha_season_schedule_cached(season_id)
+    except Exception:
+        season_schedule = []
+    try:
+        player_highlights = _fetch_hanwha_player_highlights(season_id)
+    except Exception:
+        player_highlights = None
+    fixture["series_games"] = series_games
+    fixture["postseason_bracket"] = bracket
+    fixture.update(
+        {
+            "team_rankings": ranking_rows,
+            "team_rank_date": rank_daily.get("rank_date", "") if isinstance(rank_daily, dict) else "",
+            "register_moves": register_moves,
+            "weather_info": weather_info,
+            "eagles_tv": eagles_tv,
+            "latest_news": latest_news,
+            "season_schedule": season_schedule,
+            "player_highlights": player_highlights,
+            "league_results_date": league_results_ymd,
+            "league_results_games": league_results_games,
+        }
+    )
+    return fixture
+
+
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
     rank_daily = _fetch_team_rank_daily()
     eagles_tv = _fetch_eagles_tv_latest()
@@ -5146,4 +5961,12 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "league_results_games": league_results_games,
                 }
             )
-    return None
+    return _build_postseason_snapshot(
+        today=today,
+        rank_daily=rank_daily,
+        eagles_tv=eagles_tv,
+        latest_news=latest_news,
+        register_moves=register_moves,
+        league_results_ymd=league_results_ymd,
+        league_results_games=league_results_games,
+    )
