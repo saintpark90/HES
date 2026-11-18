@@ -2620,23 +2620,30 @@ const renderFaTeamValue = (name, emblem) => `
   </strong>
 `;
 
+const faContractReady = (player) => Boolean(player?.signed && player?.signing_bonus && player?.salary);
+
 const renderFaDetail = (player) => {
-  const currentTeam = player?.signed ? (player.signed_team || player.team) : (player?.team || "-");
-  const currentEmblem = player?.signed ? (player.signed_emblem || player.emblem) : player?.emblem;
+  const signed = faContractReady(player);
+  const currentTeam = signed ? (player.signed_team || player.team) : (player?.team || "-");
+  const currentEmblem = signed ? (player.signed_emblem || player.emblem) : player?.emblem;
   const rows = [
     ["현재 소속", renderFaTeamValue(currentTeam, currentEmblem)],
     ["원소속", renderFaTeamValue(player?.team || "-", player?.emblem || "")],
-    ["계약 상태", `<strong>${escapeHtml(player?.status || "협상 중")}</strong>`],
+    ["계약 상태", `<strong>${escapeHtml(signed ? (player?.status || "계약 완료") : "협상 중")}</strong>`],
     ["FA 등급", `<strong>${escapeHtml(player?.grade ? `${player.grade}등급` : "확인된 기사 없음")}</strong>`],
   ];
-  if (player?.signed) {
-    rows.push(
-      ["계약 기간", `<strong>${escapeHtml(player.years || "-")}</strong>`],
-      ["총액", `<strong>${escapeHtml(player.total || "-")}</strong>`],
-      ["계약금", `<strong>${escapeHtml(player.signing_bonus || "-")}</strong>`],
-      ["연봉", `<strong>${escapeHtml(player.salary || "-")}</strong>`],
-      ["옵션", `<strong>${escapeHtml(player.option || "-")}</strong>`],
-    );
+  if (signed) {
+    const moneyRows = [
+      ["계약 기간", player.years],
+      ["총액", player.total],
+      ["계약금", player.signing_bonus],
+      ["연봉", player.salary],
+      ["옵션", player.option],
+    ];
+    for (const [label, value] of moneyRows) {
+      if (!value) continue;
+      rows.push([label, `<strong>${escapeHtml(value)}</strong>`]);
+    }
   }
   const body = rows.map(([label, value]) => `
     <div class="fa-detail-row"><span>${escapeHtml(label)}</span>${value}</div>
@@ -2652,8 +2659,8 @@ const renderFaDetail = (player) => {
         <button type="button" class="fa-detail-close" aria-label="닫기">×</button>
       </div>
       ${body}
-      ${player?.contract_detail ? `<p class="fa-detail-quote">${escapeHtml(player.contract_detail)}</p>` : ""}
-      ${player?.contract_source_url ? `<p class="fa-source"><a href="${escapeHtml(player.contract_source_url)}" target="_blank" rel="noopener noreferrer">계약 기사</a></p>` : ""}
+      ${signed && player?.contract_detail ? `<p class="fa-detail-quote">${escapeHtml(player.contract_detail)}</p>` : ""}
+      ${signed && player?.contract_source_url ? `<p class="fa-source"><a href="${escapeHtml(player.contract_source_url)}" target="_blank" rel="noopener noreferrer">계약 기사</a></p>` : ""}
     </div>
   `;
 };
@@ -2727,10 +2734,11 @@ const renderFaSection = (g) => {
   const body = groups.length
     ? groups.map((group) => {
         const names = group.players.map((player) => {
-          const inkTeam = player?.signed ? (player.signed_team || player.team) : "";
+          const signed = faContractReady(player);
+          const inkTeam = signed ? (player.signed_team || player.team) : "";
           const ink = teamInk(inkTeam);
           const teamId = KBO_TEAM_META[inkTeam]?.id || "";
-          const signedClass = player?.signed ? " fa-name--signed" : "";
+          const signedClass = signed ? " fa-name--signed" : "";
           const style = ink ? ` style="--fa-ink:${ink}"` : "";
           return `<button type="button" class="fa-name${signedClass}" data-fa-name="${escapeHtml(player?.name || "")}" data-team="${escapeHtml(teamId)}"${style}>${escapeHtml(player?.name || "")}</button>`;
         }).join("");

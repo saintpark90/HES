@@ -6253,7 +6253,7 @@ _FA_DONE = (
     r"(?:체결|계약|사인)했|사인을\s*마쳤|계약을\s*마쳤|계약을\s*맺|도장을\s*찍|"
     r"(?:체결|계약)한|잔류를\s*(?:확정|결정)했|잔류에\s*성공|계약을\s*발표(?:했|한)"
 )
-_FA_NOT_DONE = r"했었|한\s*바|적이\s*있|시즌이\s*끝난\s*후|비FA|체결할|계약할|발표할|잔류시킨다는"
+_FA_NOT_DONE = r"했었|한\s*바|적이\s*있|시즌이\s*끝난\s*후|시즌\s*종료\s*후|비FA|체결할|계약할|발표할|잔류시킨다는"
 
 
 def _grab_total(text: str) -> str:
@@ -6266,6 +6266,16 @@ def _grab_total(text: str) -> str:
     if not matches:
         return ""
     return re.sub(r"\s+", "", matches[-1].group(1))
+
+
+def _contract_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[다요]\.)\s+|(?<=[다요])…+|\.{2,}|…+", text)
+    return [re.sub(r"\s+", " ", part).strip(" \"'") for part in parts if part and part.strip()]
+
+
+def _contract_publishable(info: Optional[Dict[str, str]]) -> bool:
+    """계약금과 연봉이 같은 계약 문장에서 확인된 경우만 체결로 본다."""
+    return bool(info and info.get("signing_bonus") and info.get("salary") and info.get("signed_team"))
 
 
 def _contract_span(name: str, chunk: str, others: Optional[list[str]] = None) -> str:
@@ -6319,6 +6329,33 @@ def _nearest_team(text: str, *, last: bool = True) -> str:
     return found
 
 
+def _team_near_name(name: str, text: str) -> str:
+    anchor = text.find(name)
+    if anchor < 0:
+        return _nearest_team(text)
+    best = ""
+    best_dist = 10**9
+    window_start = max(0, anchor - 48)
+    window = text[window_start: anchor + len(name) + 48]
+    for pattern, team in (
+        ("한화", "한화"),
+        ("삼성", "삼성"),
+        ("(?<![A-Za-z])kt(?![A-Za-z])", "KT"),
+        ("(?<![A-Za-z])kia(?![A-Za-z])", "KIA"),
+        ("(?<![A-Za-z])lg(?![A-Za-z])", "LG"),
+        ("두산", "두산"),
+        ("(?<![A-Za-z])ssg(?![A-Za-z])", "SSG"),
+        ("(?<![A-Za-z])nc(?![A-Za-z])", "NC"),
+        ("롯데", "롯데"),
+        ("키움", "키움"),
+    ):
+        for match in re.finditer(pattern, window, flags=re.I):
+            dist = abs((window_start + match.start()) - anchor)
+            if dist < best_dist:
+                best, best_dist = team, dist
+    return best
+
+
 def _contract_from_text(
     name: str,
     text: str,
@@ -6328,10 +6365,9 @@ def _contract_from_text(
 ) -> Optional[Dict[str, str]]:
     if name not in text:
         return None
-    chunks = re.split(r"(?<=[다요]\.)\s+|(?<=밝혔다\.)\s+", text)
     span = ""
     chosen = ""
-    for chunk in chunks:
+    for chunk in _contract_sentences(text):
         if name not in chunk:
             continue
         span = _contract_span(name, chunk, others)
@@ -6339,18 +6375,11 @@ def _contract_from_text(
             chosen = chunk
             break
     if not span:
-        span = _contract_span(name, text, others)
-        chosen = text
-    if not span:
         return None
-    anchor = chosen.find(name)
-    window = chosen[max(0, anchor - 36): anchor + len(name) + 90] if anchor >= 0 else span
-    after = window.split(name, 1)[-1]
-    before = window.split(name, 1)[0]
-    if "잔류" in after[:48]:
-        signed_team = _nearest_team(after, last=False) or _nearest_team(before)
-    else:
-        signed_team = _nearest_team(before) or _nearest_team(after, last=False)
+    paren = re.search(rf"{re.escape(name)}\s*\(([^)]{{0,48}})\)", chosen)
+    signed_team = _nearest_team(paren.group(1)) if paren else ""
+    if not signed_team:
+        signed_team = _team_near_name(name, chosen) or _team_near_name(name, source_title)
     year_matches = re.findall(r"(?<!\d)(\d{1,2})\s*년", span)
     years = f"{year_matches[-1]}년" if year_matches else ""
     total = _grab_total(span)
@@ -6518,31 +6547,50 @@ def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
                 card.get("title") or "",
                 names,
             )
-            if not found or not (found.get("total") or found.get("signing_bonus")):
+            if not found:
                 continue
             if not found.get("signed_team") and "잔류" in (found.get("detail") or ""):
                 found["signed_team"] = str(player.get("team") or "")
+            if not _contract_publishable(found):
+                continue
             previous = best.get(name)
             if previous is None or _contract_score(found) > _contract_score(previous):
                 best[name] = found
     for player in players:
         name = str(player.get("name") or "")
-        current = best.get(name)
-        if not current or current.get("signing_bonus"):
+        if _contract_publishable(best.get(name)):
             continue
-        for card in _search_news_cards(f"{name} 계약금")[:6]:
+        checked_urls: set[str] = set()
+        for card in _search_news_cards(f"{name} 계약금")[:4]:
+            url = card.get("url") or ""
             blob = f"{card.get('title') or ''} {card.get('body') or ''}"
-            found = _contract_from_text(name, blob, card.get("url") or "", card.get("title") or "", names)
-            if not found or not found.get("signing_bonus"):
+            sources = [blob]
+            same_sentence = any(
+                name in sentence and "계약금" in sentence
+                for sentence in _contract_sentences(blob)
+            )
+            if same_sentence and url and url not in checked_urls:
+                checked_urls.add(url)
+                article = _fetch_article_text(url)
+                if article:
+                    sources.append(article)
+            found = None
+            for source in sources:
+                found = _contract_from_text(name, source, url, card.get("title") or "", names)
+                if found and not found.get("signed_team") and "잔류" in (found.get("detail") or ""):
+                    found["signed_team"] = str(player.get("team") or "")
+                if _contract_publishable(found):
+                    break
+                found = None
+            if not found:
                 continue
-            if not found.get("signed_team") and "잔류" in (found.get("detail") or ""):
-                found["signed_team"] = str(player.get("team") or "")
-            if found.get("signed_team") and _contract_score(found) > _contract_score(current):
+            previous = best.get(name)
+            if previous is None or _contract_score(found) > _contract_score(previous):
                 best[name] = found
-                current = found
+                break
     for player in players:
         found = best.get(str(player.get("name") or ""))
-        if not found or not found.get("signed_team"):
+        if not _contract_publishable(found):
             continue
         signed_team = found["signed_team"]
         player["signed"] = True
