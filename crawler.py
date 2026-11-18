@@ -6365,38 +6365,38 @@ def _contract_from_text(
 ) -> Optional[Dict[str, str]]:
     if name not in text:
         return None
-    span = ""
-    chosen = ""
+    best_info: Optional[Dict[str, str]] = None
+    best_key = (-1, -1)
     for chunk in _contract_sentences(text):
         if name not in chunk:
             continue
         span = _contract_span(name, chunk, others)
-        if span:
-            chosen = chunk
-            break
-    if not span:
-        return None
-    paren = re.search(rf"{re.escape(name)}\s*\(([^)]{{0,48}})\)", chosen)
-    signed_team = _nearest_team(paren.group(1)) if paren else ""
-    if not signed_team:
-        signed_team = _team_near_name(name, chosen) or _team_near_name(name, source_title)
-    year_matches = re.findall(r"(?<!\d)(\d{1,2})\s*년", span)
-    years = f"{year_matches[-1]}년" if year_matches else ""
-    total = _grab_total(span)
-    signing_bonus = _grab_money(r"계약금", span)
-    salary = _grab_money(r"연봉(?:\s*총액)?", span)
-    option = _grab_money(r"옵션", span) or _grab_money(r"인센티브", span)
-    return {
-        "signed_team": signed_team,
-        "years": years,
-        "total": total,
-        "signing_bonus": signing_bonus,
-        "salary": salary,
-        "option": option,
-        "source_url": source_url,
-        "source_title": source_title,
-        "detail": re.sub(r"\s+", " ", span).strip()[:280],
-    }
+        if not span:
+            continue
+        paren = re.search(rf"{re.escape(name)}\s*\(([^)]{{0,48}})\)", chunk)
+        signed_team = _nearest_team(paren.group(1)) if paren else ""
+        if not signed_team:
+            signed_team = _team_near_name(name, chunk) or _team_near_name(name, source_title)
+        year_matches = re.findall(r"(?<!\d)(\d{1,2})\s*년", span)
+        info = {
+            "signed_team": signed_team,
+            "years": f"{year_matches[-1]}년" if year_matches else "",
+            "total": _grab_total(span),
+            "signing_bonus": _grab_money(r"계약금", span),
+            "salary": _grab_money(r"연봉(?:\s*총액)?", span),
+            "option": _grab_money(r"옵션", span) or _grab_money(r"인센티브", span),
+            "source_url": source_url,
+            "source_title": source_title,
+            "detail": re.sub(r"\s+", " ", span).strip()[:280],
+        }
+        key = (
+            1 if info["signing_bonus"] and info["salary"] else 0,
+            _contract_score(info),
+        )
+        if key > best_key:
+            best_info = info
+            best_key = key
+    return best_info
 
 
 def _contract_score(info: Dict[str, str]) -> int:
@@ -6457,6 +6457,37 @@ def _attach_fa_photos(players: list[Dict[str, Any]], season: str) -> None:
         player["image_url"] = image_url
 
 
+def _fetch_kbo_contract_cards() -> list[Dict[str, str]]:
+    """KBO 공식 포토뉴스에서 계약·재계약 발표를 가져온다."""
+    list_url = "https://www.koreabaseball.com/MediaNews/News/KboPhoto/List.aspx"
+    try:
+        response = requests.get(
+            list_url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.koreabaseball.com/"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        response.encoding = "utf-8"
+    except Exception:
+        return []
+    cards: list[Dict[str, str]] = []
+    seen: set[str] = set()
+    for anchor in BeautifulSoup(response.text, "html.parser").select("a[href*='View.aspx']"):
+        title = anchor.get_text(" ", strip=True)
+        match = re.search(r"bdSe=(\d+)", str(anchor.get("href") or ""))
+        if not title or not match or match.group(1) in seen:
+            continue
+        if title.startswith("[사진]") or not re.search(r"계약|재계약|잔류", title):
+            continue
+        seen.add(match.group(1))
+        url = "https://www.koreabaseball.com/MediaNews/News/KboPhoto/View.aspx?bdSe=" + match.group(1)
+        article = _fetch_article_text(url)
+        cards.append({"title": title, "url": url, "body": "", "article": article})
+        if len(cards) >= 8:
+            break
+    return cards
+
+
 def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
     """승인 명단에 팀 로고를 붙이고, 최신 기사에서 등급과 체결된 계약을 갱신한다."""
     season = str(_today_kst().year)
@@ -6511,6 +6542,7 @@ def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
         seen_urls.add(url)
         unique_cards.append(card)
     cards = unique_cards
+    cards.extend(_fetch_kbo_contract_cards())
     texts = [f"{card.get('title') or ''} {card.get('body') or ''}".strip() for card in cards]
     fetched = 0
     ranked_cards = sorted(
