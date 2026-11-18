@@ -132,6 +132,20 @@ def _highlight_score(data: object) -> int:
     return (2 if awards else 0) + (1 if titles else 0)
 
 
+def _news_quality(items: list) -> int:
+    score = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("thumbnail"):
+            score += 2
+        if item.get("published_at"):
+            score += 2
+        if item.get("source_name"):
+            score += 1
+    return score
+
+
 def _merge_news_and_highlight_fallbacks(current_info: dict, previous_info: dict) -> dict:
     """스케줄 수집이 뉴스·수상 예상을 비우면 직전 스냅샷을 유지한다."""
     if not current_info:
@@ -139,7 +153,7 @@ def _merge_news_and_highlight_fallbacks(current_info: dict, previous_info: dict)
     merged = dict(current_info)
     current_news = merged.get("latest_news") if isinstance(merged.get("latest_news"), list) else []
     previous_news = previous_info.get("latest_news") if isinstance(previous_info.get("latest_news"), list) else []
-    if not current_news and previous_news:
+    if _news_quality(previous_news) > _news_quality(current_news):
         merged["latest_news"] = previous_news
     if _highlight_score(previous_info.get("player_highlights")) > _highlight_score(merged.get("player_highlights")):
         merged["player_highlights"] = previous_info.get("player_highlights")

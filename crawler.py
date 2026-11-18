@@ -1983,10 +1983,9 @@ def _fetch_hanwha_news_from_search(limit: int) -> list[Dict[str, str]]:
     for card in _search_news_cards("한화 이글스"):
         title = str(card.get("title") or "").strip()
         url = str(card.get("url") or "").strip()
-        body = str(card.get("body") or "")
         if not title or not url or url in seen:
             continue
-        if "한화" not in title and "이글스" not in title and "한화" not in body:
+        if "한화" not in title and "이글스" not in title:
             continue
         seen.add(url)
         result.append(

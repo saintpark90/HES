@@ -1673,18 +1673,25 @@ const renderEaglesTvSection = (g) => {
 
 const renderLatestNewsSection = (g) => {
   const newsList = Array.isArray(g?.latest_news) ? g.latest_news : [];
-  const cards = newsList.slice(0, 5).map((news) => `
+  const cards = newsList.slice(0, 5).map((news) => {
+    const thumb = news.thumbnail
+      ? `<img src="${escapeHtml(news.thumbnail)}" alt="" class="news-thumb" loading="lazy" />`
+      : "";
+    const source = news.source_name ? `<div class="news-sub">${escapeHtml(news.source_name)}</div>` : "";
+    const time = news.published_at ? `<div class="news-time">${formatUpdatedAt(news.published_at)}</div>` : "";
+    return `
       <article class="news-card">
-        <a href="${news.url || "#"}" target="_blank" rel="noopener noreferrer" class="news-link">
-          ${news.thumbnail ? `<img src="${news.thumbnail}" alt="뉴스 썸네일" class="news-thumb" loading="lazy" />` : ""}
+        <a href="${escapeHtml(news.url || "#")}" target="_blank" rel="noopener noreferrer" class="news-link${thumb ? "" : " news-link--text"}">
+          ${thumb}
           <div class="news-meta">
-            <div class="news-title">${news.title || "-"}</div>
-            <div class="news-sub">${news.source_name || "-"}</div>
-            <div class="news-time">${formatUpdatedAt(news.published_at || "")}</div>
+            <div class="news-title">${escapeHtml(news.title || "-")}</div>
+            ${source}
+            ${time}
           </div>
         </a>
       </article>
-    `).join("");
+    `;
+  }).join("");
 
   return `
     <section class="news-section">

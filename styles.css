@@ -2442,9 +2442,13 @@ html[data-theme="dark"] .fa-detail-photo {
 
 .news-link {
   display: grid;
-  grid-template-columns: 132px 1fr;
+  grid-template-columns: 132px minmax(0, 1fr);
   color: var(--hes-text);
   text-decoration: none;
+}
+
+.news-link--text {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .news-thumb {
