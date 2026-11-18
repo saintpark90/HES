@@ -6370,6 +6370,25 @@ def _apply_fa_grades(players: list[Dict[str, Any]], texts: list[str]) -> None:
         set_grade(right, grade)
 
 
+def _attach_fa_photos(players: list[Dict[str, Any]], season: str) -> None:
+    """FA 카드에 쓸 선수 사진을 KBO 선수 검색으로 찾는다."""
+
+    def lookup(player: Dict[str, Any]) -> tuple[str, str, str]:
+        name = str(player.get("name") or "")
+        team_id = str(player.get("team_id") or "")
+        player_id = _resolve_pitcher_id_from_search(name, team_id) if name else ""
+        image_url = _face_image_url(season, player_id) if player_id else ""
+        return name, player_id, image_url
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        found = list(pool.map(lookup, players))
+    by_name = {name: (player_id, image_url) for name, player_id, image_url in found if name}
+    for player in players:
+        player_id, image_url = by_name.get(str(player.get("name") or ""), ("", ""))
+        player["player_id"] = player_id
+        player["image_url"] = image_url
+
+
 def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
     """승인 명단에 팀 로고를 붙이고, 최신 기사에서 등급과 체결된 계약을 갱신한다."""
     season = str(_today_kst().year)
@@ -6392,6 +6411,9 @@ def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
         player["contract_source_url"] = ""
         player["contract_source_title"] = ""
         player["contract_detail"] = ""
+        player["player_id"] = ""
+        player["image_url"] = ""
+    _attach_fa_photos(players, season)
     for player in payload.get("declined") or []:
         if not isinstance(player, dict):
             continue

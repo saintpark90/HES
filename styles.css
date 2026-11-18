@@ -1985,8 +1985,26 @@ body.fa-modal-open {
 .fa-detail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fa-detail-photo {
+  width: 84px;
+  height: 112px;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: 10px;
+  background: #f0f0f0;
+  flex: none;
+}
+
+.fa-detail-name {
+  font-size: 18px;
+}
+
+html[data-theme="dark"] .fa-detail-photo {
+  background: #1a1a1a;
 }
 
 .fa-detail-close {

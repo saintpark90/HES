@@ -2638,15 +2638,17 @@ const renderFaDetail = (player) => {
       ["옵션", `<strong>${escapeHtml(player.option || "-")}</strong>`],
     );
   }
-  const headEmblem = currentEmblem || player?.emblem;
   const body = rows.map(([label, value]) => `
     <div class="fa-detail-row"><span>${escapeHtml(label)}</span>${value}</div>
   `).join("");
+  const photo = player?.image_url
+    ? `<img class="fa-detail-photo" src="${escapeHtml(player.image_url)}" alt="${escapeHtml(player?.name || "")}" />`
+    : "";
   return `
     <div class="fa-detail-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(player?.name || "FA 선수")}">
       <div class="fa-detail-head">
-        ${headEmblem ? `<img src="${escapeHtml(headEmblem)}" alt="" class="fa-team-logo" />` : ""}
-        <strong>${escapeHtml(player?.name || "")}</strong>
+        ${photo}
+        <strong class="fa-detail-name">${escapeHtml(player?.name || "")}</strong>
         <button type="button" class="fa-detail-close" aria-label="닫기">×</button>
       </div>
       ${body}
