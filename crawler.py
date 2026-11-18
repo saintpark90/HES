@@ -1976,6 +1976,33 @@ def _naver_get(
     return response
 
 
+def _fetch_hanwha_news_from_search(limit: int) -> list[Dict[str, str]]:
+    """팀 뉴스 API가 비면 네이버 뉴스 검색으로 한화 기사를 채운다."""
+    result: list[Dict[str, str]] = []
+    seen: set[str] = set()
+    for card in _search_news_cards("한화 이글스"):
+        title = str(card.get("title") or "").strip()
+        url = str(card.get("url") or "").strip()
+        body = str(card.get("body") or "")
+        if not title or not url or url in seen:
+            continue
+        if "한화" not in title and "이글스" not in title and "한화" not in body:
+            continue
+        seen.add(url)
+        result.append(
+            {
+                "title": title,
+                "url": url,
+                "thumbnail": "",
+                "source_name": "",
+                "published_at": "",
+            }
+        )
+        if len(result) >= limit:
+            break
+    return result
+
+
 def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
     params = {
         "team": HANWHA_TEAM_ID,
@@ -1992,17 +2019,23 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         ),
         "Referer": "https://m.sports.naver.com/myteam/kbo/team/HH/news",
+        "Origin": "https://m.sports.naver.com",
     }
-    try:
-        response = _naver_get(
-            NAVER_SPORTS_NEWS_API_URL,
-            params=params,
-            timeout=20,
-            headers=headers,
-        )
-        payload = response.json()
-    except Exception:
-        return []
+    payload = None
+    for _ in range(3):
+        try:
+            response = _naver_get(
+                NAVER_SPORTS_NEWS_API_URL,
+                params=params,
+                timeout=20,
+                headers=headers,
+            )
+            payload = response.json()
+            break
+        except Exception:
+            payload = None
+    if not isinstance(payload, dict):
+        return _fetch_hanwha_news_from_search(limit)
 
     news_list = ((payload.get("result") or {}).get("newsList") or [])[:limit]
     result: list[Dict[str, str]] = []
@@ -2021,7 +2054,7 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
                 "published_at": str(item.get("dateTime", "") or "").strip(),
             }
         )
-    return result
+    return result or _fetch_hanwha_news_from_search(limit)
 
 
 def _fetch_player_profile_for_register(name: str) -> Dict[str, str]:
@@ -4020,23 +4053,27 @@ def _fetch_sorted_players(
     sort_direction: str,
     page_size: int,
 ) -> list[Dict[str, Any]]:
-    try:
-        response = _naver_get(
-            NAVER_KBO_PLAYERS_URL.format(season=season),
-            params={
-                "playerType": player_type,
-                "pageSize": page_size,
-                "sortField": sort_field,
-                "sortDirection": sort_direction,
-            },
-            timeout=20,
-        )
-        batch = ((response.json().get("result") or {}).get("seasonPlayerStats") or [])
-    except Exception:
-        return []
-    if not isinstance(batch, list):
-        return []
-    return _dedupe_player_rows([row for row in batch if isinstance(row, dict)])
+    timeout = 45 if page_size >= 200 else 20
+    attempts = 2 if page_size >= 200 else 1
+    for _ in range(attempts):
+        try:
+            response = _naver_get(
+                NAVER_KBO_PLAYERS_URL.format(season=season),
+                params={
+                    "playerType": player_type,
+                    "pageSize": page_size,
+                    "sortField": sort_field,
+                    "sortDirection": sort_direction,
+                },
+                timeout=timeout,
+            )
+            batch = ((response.json().get("result") or {}).get("seasonPlayerStats") or [])
+        except Exception:
+            continue
+        if not isinstance(batch, list) or not batch:
+            continue
+        return _dedupe_player_rows([row for row in batch if isinstance(row, dict)])
+    return []
 
 
 def _fetch_naver_season_players(season: str, player_type: str) -> list[Dict[str, Any]]:
@@ -5084,14 +5121,16 @@ def _fetch_hanwha_player_highlights(season_id: str) -> Optional[Dict[str, Any]]:
     try:
         hitters = _fetch_naver_season_players(season, "HITTER")
         pitchers = _fetch_naver_season_players(season, "PITCHER")
-        if not hitters and not pitchers:
-            return None
-        defense_rows = _fetch_kbo_defense_rows()
+        defense_rows = _fetch_kbo_defense_rows() if (hitters or pitchers) else []
         titles = _build_hanwha_title_cards(season)
-        awards = _build_golden_glove_awards(hitters, pitchers, defense_rows, season)
-        rookie = _build_rookie_award(hitters, pitchers, season)
-        if rookie:
-            awards.insert(0, rookie)
+        awards: list[Dict[str, Any]] = []
+        if hitters or pitchers:
+            awards = _build_golden_glove_awards(hitters, pitchers, defense_rows, season)
+            rookie = _build_rookie_award(hitters, pitchers, season)
+            if rookie:
+                awards.insert(0, rookie)
+        if not titles and not awards:
+            return None
         payload = {"titles": titles, "awards": awards}
     except Exception:
         return None

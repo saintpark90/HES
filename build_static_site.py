@@ -124,6 +124,33 @@ def _merge_starter_fallbacks(current_info: dict, previous_info: dict) -> dict:
     return merged
 
 
+def _highlight_score(data: object) -> int:
+    if not isinstance(data, dict):
+        return 0
+    titles = data.get("titles") if isinstance(data.get("titles"), list) else []
+    awards = data.get("awards") if isinstance(data.get("awards"), list) else []
+    return (2 if awards else 0) + (1 if titles else 0)
+
+
+def _merge_news_and_highlight_fallbacks(current_info: dict, previous_info: dict) -> dict:
+    """스케줄 수집이 뉴스·수상 예상을 비우면 직전 스냅샷을 유지한다."""
+    if not current_info:
+        return current_info
+    merged = dict(current_info)
+    current_news = merged.get("latest_news") if isinstance(merged.get("latest_news"), list) else []
+    previous_news = previous_info.get("latest_news") if isinstance(previous_info.get("latest_news"), list) else []
+    if not current_news and previous_news:
+        merged["latest_news"] = previous_news
+    if _highlight_score(previous_info.get("player_highlights")) > _highlight_score(merged.get("player_highlights")):
+        merged["player_highlights"] = previous_info.get("player_highlights")
+    current_hours = ((merged.get("weather_info") or {}) if isinstance(merged.get("weather_info"), dict) else {}).get("hourly")
+    previous_weather = previous_info.get("weather_info") if isinstance(previous_info.get("weather_info"), dict) else {}
+    previous_hours = previous_weather.get("hourly") if isinstance(previous_weather.get("hourly"), list) else []
+    if not current_hours and previous_hours:
+        merged["weather_info"] = previous_weather
+    return merged
+
+
 def _merge_register_moves_fallbacks(current_info: dict, previous_info: dict) -> dict:
     """당일 등록·말소 인원이 비어 있으면(변동 없음·파싱 실패 등) 직전 스냅샷을 유지한다."""
     if not current_info:
@@ -235,6 +262,7 @@ def build() -> None:
     if game_info:
         game_info = ensure_game_starters_from_namu(game_info)
         game_info = _merge_media_fallbacks(game_info, previous_game_info)
+        game_info = _merge_news_and_highlight_fallbacks(game_info, previous_game_info)
         game_info = _merge_starter_fallbacks(game_info, previous_game_info)
         game_info = _merge_register_moves_fallbacks(game_info, previous_game_info)
         game_info = _merge_register_moves_cache_fallback(game_info, register_moves_cache)
