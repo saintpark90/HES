@@ -6051,8 +6051,29 @@ def _fa_groups_in(text: str) -> list[Dict[str, Any]]:
     return players
 
 
+def _parse_fa_grade_roster(text: str) -> list[Dict[str, Any]]:
+    """'삼성 라이온즈(3명) 원태인(A), 구자욱(A)' 형식의 명단을 읽는다."""
+    players: list[Dict[str, Any]] = []
+    seen = set()
+    pattern = re.compile(
+        r"(한화|삼성|kt|kia|lg|두산|ssg|nc|롯데|키움).{0,20}?\(\d+\s*명\)\s*((?:[가-힣]{2,4}\(\s*[ABC]\s*\)\s*,?\s*)+)",
+        flags=re.I,
+    )
+    for match in pattern.finditer(text or ""):
+        team = _normalize_fa_team(match.group(1))
+        if not team:
+            continue
+        for name, grade in re.findall(r"([가-힣]{2,4})\(\s*([ABC])\s*\)", match.group(2)):
+            if name in seen:
+                continue
+            seen.add(name)
+            players.append({"name": name, "team": team, "grade": grade})
+    return players
+
+
 def _parse_fa_article_text(text: str) -> Dict[str, Any]:
     compact = re.sub(r"\s+", " ", text or "")
+    graded = _parse_fa_grade_roster(compact)
     split_at = compact.find("신청하지")
     if split_at > 0:
         marker = compact.rfind("가운데", 0, split_at)
@@ -6080,6 +6101,10 @@ def _parse_fa_article_text(text: str) -> Dict[str, Any]:
             continue
         seen_declined.add(item["name"])
         declined_unique.append({"name": item["name"], "team": item["team"]})
+    if len(graded) >= 15:
+        declined_names = {item["name"] for item in declined_unique}
+        roster = [item for item in graded if item["name"] not in declined_names]
+        return {"players": roster, "declined": declined_unique}
     return {"players": players, "declined": declined_unique}
 
 
@@ -6178,42 +6203,121 @@ def _teams_mentioned(text: str) -> list[str]:
 
 
 def _grab_money(label: str, text: str) -> str:
-    match = re.search(label + r"\s*([0-9][0-9,\s억만]*원)", text)
-    if not match:
+    matches = list(re.finditer(label + r"\s*" + _FA_MONEY, text))
+    if not matches:
         return ""
-    return re.sub(r"\s+", "", match.group(1))
+    return re.sub(r"\s+", "", matches[-1].group(1))
 
 
-def _contract_from_text(name: str, text: str, source_url: str, source_title: str) -> Optional[Dict[str, str]]:
+_FA_MONEY = r"([0-9][0-9,\s]*억(?:\s*[0-9][0-9,\s]*만)?(?:\s*원)?)"
+_FA_DONE = (
+    r"(?:체결|계약|사인)했|사인을\s*마쳤|계약을\s*마쳤|계약을\s*맺|도장을\s*찍|"
+    r"(?:체결|계약)한|잔류를\s*(?:확정|결정)했|잔류에\s*성공|계약을\s*발표(?:했|한)"
+)
+_FA_NOT_DONE = r"했었|한\s*바|적이\s*있|시즌이\s*끝난\s*후|비FA|체결할|계약할|발표할|잔류시킨다는"
+
+
+def _grab_total(text: str) -> str:
+    matches = []
+    for match in re.finditer(r"(?:총액|최대)\s*" + _FA_MONEY, text):
+        prefix = text[max(0, match.start() - 4): match.start()]
+        if re.search(r"연봉\s*$", prefix):
+            continue
+        matches.append(match)
+    if not matches:
+        return ""
+    return re.sub(r"\s+", "", matches[-1].group(1))
+
+
+def _contract_span(name: str, chunk: str, others: Optional[list[str]] = None) -> str:
+    verb_span = ""
+    for pattern in (
+        rf"{re.escape(name)}.{{0,160}}?(?:{_FA_DONE})",
+        rf"(?:{_FA_DONE}).{{0,70}}?{re.escape(name)}",
+    ):
+        match = re.search(pattern, chunk)
+        if not match:
+            continue
+        span = match.group(0)
+        if re.search(_FA_NOT_DONE, span):
+            continue
+        if any(other and other != name and other in span for other in (others or [])):
+            continue
+        verb_span = span
+        break
+    paren_span = ""
+    paren = re.search(rf"{re.escape(name)}\s*\(([^)]{{0,48}})\)", chunk)
+    if paren and re.search(r"\d{1,2}\s*년", paren.group(1)) and "억" in paren.group(1):
+        paren_span = f"{name}({paren.group(1)})"
+    if verb_span and paren_span:
+        return verb_span if verb_span.count("억") >= paren_span.count("억") else paren_span
+    return verb_span or paren_span
+
+
+def _nearest_team(text: str, *, last: bool = True) -> str:
+    found = ""
+    found_at = -1 if last else 10**9
+    for pattern, team in (
+        ("한화", "한화"),
+        ("삼성", "삼성"),
+        ("(?<![A-Za-z])kt(?![A-Za-z])", "KT"),
+        ("(?<![A-Za-z])kia(?![A-Za-z])", "KIA"),
+        ("(?<![A-Za-z])lg(?![A-Za-z])", "LG"),
+        ("두산", "두산"),
+        ("(?<![A-Za-z])ssg(?![A-Za-z])", "SSG"),
+        ("(?<![A-Za-z])nc(?![A-Za-z])", "NC"),
+        ("롯데", "롯데"),
+        ("키움", "키움"),
+    ):
+        matches = list(re.finditer(pattern, text, flags=re.I))
+        if not matches:
+            continue
+        match = matches[-1] if last else matches[0]
+        if last and match.start() >= found_at:
+            found, found_at = team, match.start()
+        elif not last and match.start() <= found_at:
+            found, found_at = team, match.start()
+    return found
+
+
+def _contract_from_text(
+    name: str,
+    text: str,
+    source_url: str,
+    source_title: str,
+    others: Optional[list[str]] = None,
+) -> Optional[Dict[str, str]]:
     if name not in text:
         return None
     chunks = re.split(r"(?<=[다요]\.)\s+|(?<=밝혔다\.)\s+", text)
+    span = ""
     chosen = ""
     for chunk in chunks:
         if name not in chunk:
             continue
-        if not re.search(rf"{re.escape(name)}.{{0,90}}(?:체결했|계약했|사인했)|(?:체결했|계약했|사인했).{{0,50}}{re.escape(name)}", chunk):
-            continue
-        if re.search(r"체결할|계약할 예정", chunk) and "체결했" not in chunk and "계약했" not in chunk:
-            continue
-        chosen = chunk
-        break
-    if not chosen:
+        span = _contract_span(name, chunk, others)
+        if span:
+            chosen = chunk
+            break
+    if not span:
+        span = _contract_span(name, text, others)
+        chosen = text
+    if not span:
         return None
-    prefix = chosen.split(name, 1)[0]
-    teams_before = _teams_mentioned(prefix[-80:])
-    teams = _teams_mentioned(chosen)
-    signed_team = teams_before[-1] if teams_before else (teams[0] if len(teams) == 1 else "")
-    if not signed_team and "잔류" in chosen:
-        signed_team = ""
-    years = ""
-    year_match = re.search(r"(\d+)\s*년", chosen)
-    if year_match:
-        years = f"{year_match.group(1)}년"
-    total = _grab_money(r"(?:총액|최대)", chosen)
-    signing_bonus = _grab_money(r"계약금", chosen)
-    salary = _grab_money(r"연봉(?:\s*총액)?", chosen)
-    option = _grab_money(r"옵션", chosen) or _grab_money(r"인센티브", chosen)
+    anchor = chosen.find(name)
+    window = chosen[max(0, anchor - 36): anchor + len(name) + 90] if anchor >= 0 else span
+    after = window.split(name, 1)[-1]
+    before = window.split(name, 1)[0]
+    if "잔류" in after[:48]:
+        signed_team = _nearest_team(after, last=False) or _nearest_team(before)
+    else:
+        signed_team = _nearest_team(before) or _nearest_team(after, last=False)
+    year_matches = re.findall(r"(?<!\d)(\d{1,2})\s*년", span)
+    years = f"{year_matches[-1]}년" if year_matches else ""
+    total = _grab_total(span)
+    signing_bonus = _grab_money(r"계약금", span)
+    salary = _grab_money(r"연봉(?:\s*총액)?", span)
+    option = _grab_money(r"옵션", span) or _grab_money(r"인센티브", span)
     return {
         "signed_team": signed_team,
         "years": years,
@@ -6223,7 +6327,7 @@ def _contract_from_text(name: str, text: str, source_url: str, source_title: str
         "option": option,
         "source_url": source_url,
         "source_title": source_title,
-        "detail": re.sub(r"\s+", " ", chosen).strip()[:280],
+        "detail": re.sub(r"\s+", " ", span).strip()[:280],
     }
 
 
@@ -6300,6 +6404,23 @@ def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
     cards: list[Dict[str, str]] = []
     for query in ("FA 계약 체결", "FA 잔류 계약", "FA A등급 명단"):
         cards.extend(_search_news_cards(query))
+    names = [str(player.get("name") or "") for player in players if player.get("name")]
+
+    def load_player_news(name: str) -> list[Dict[str, str]]:
+        return _search_news_cards(f"{name} FA 계약")
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for extra in pool.map(load_player_news, names):
+            cards.extend(extra)
+    seen_urls: set[str] = set()
+    unique_cards: list[Dict[str, str]] = []
+    for card in cards:
+        url = card.get("url") or ""
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        unique_cards.append(card)
+    cards = unique_cards
     texts = [f"{card.get('title') or ''} {card.get('body') or ''}".strip() for card in cards]
     fetched = 0
     ranked_cards = sorted(
@@ -6329,14 +6450,35 @@ def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         for player in players:
             name = str(player.get("name") or "")
-            found = _contract_from_text(name, blob, card.get("url") or "", card.get("title") or "")
-            if not found:
+            found = _contract_from_text(
+                name,
+                blob,
+                card.get("url") or "",
+                card.get("title") or "",
+                names,
+            )
+            if not found or not (found.get("total") or found.get("signing_bonus")):
                 continue
             if not found.get("signed_team") and "잔류" in (found.get("detail") or ""):
                 found["signed_team"] = str(player.get("team") or "")
             previous = best.get(name)
-            if previous is None or _contract_score(found) >= _contract_score(previous):
+            if previous is None or _contract_score(found) > _contract_score(previous):
                 best[name] = found
+    for player in players:
+        name = str(player.get("name") or "")
+        current = best.get(name)
+        if not current or current.get("signing_bonus"):
+            continue
+        for card in _search_news_cards(f"{name} 계약금")[:6]:
+            blob = f"{card.get('title') or ''} {card.get('body') or ''}"
+            found = _contract_from_text(name, blob, card.get("url") or "", card.get("title") or "", names)
+            if not found or not found.get("signing_bonus"):
+                continue
+            if not found.get("signed_team") and "잔류" in (found.get("detail") or ""):
+                found["signed_team"] = str(player.get("team") or "")
+            if found.get("signed_team") and _contract_score(found) > _contract_score(current):
+                best[name] = found
+                current = found
     for player in players:
         found = best.get(str(player.get("name") or ""))
         if not found or not found.get("signed_team"):
@@ -6384,24 +6526,36 @@ def _fetch_fa_players() -> Dict[str, Any]:
                 for year, month, day in re.findall(r"(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})", body)
             ]
             announced_on = max(dates) if dates else ""
+        declined = parsed.get("declined") or [
+            {"name": "서진용", "team": "SSG"},
+            {"name": "김성현", "team": "SSG"},
+            {"name": "한유섬", "team": "SSG"},
+            {"name": "박승욱", "team": "롯데"},
+            {"name": "이재원", "team": "한화"},
+            {"name": "최주환", "team": "키움"},
+        ]
         return {
             "announced_on": announced_on,
             "source_title": source_title,
             "source_url": source_url,
             "players": parsed["players"],
-            "declined": parsed.get("declined") or [],
+            "declined": declined,
             "note": "KBO가 공시한 FA 승인 선수입니다. 승인 선수는 공시 다음 날부터 협상할 수 있습니다.",
         }
 
-    cards = _search_news_cards("KBO FA 승인 선수 명단 공시")
-    for card in cards[:8]:
-        url = card.get("url") or ""
-        article_text = _fetch_article_text(url)
-        if not article_text:
-            continue
-        accepted = accept(_parse_fa_article_text(article_text), url, card.get("title") or "", article_text)
-        if accepted:
-            return _enrich_fa_market(accepted)
+    seen_urls: set[str] = set()
+    for query in ("FA 승인 선수 명단 원태인(A) 구자욱(A)", "KBO FA 승인 선수 명단 공시"):
+        for card in _search_news_cards(query)[:8]:
+            url = card.get("url") or ""
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            article_text = _fetch_article_text(url)
+            if not article_text:
+                continue
+            accepted = accept(_parse_fa_article_text(article_text), url, card.get("title") or "", article_text)
+            if accepted:
+                return _enrich_fa_market(accepted)
     return empty
 
 

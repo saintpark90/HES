@@ -1945,15 +1945,41 @@ html[data-theme="dark"] .fa-name--signed[data-team="KT"] {
   border-color: #f2f2f2;
 }
 
-.fa-detail {
-  margin-top: 12px;
+body.fa-modal-open {
+  overflow: hidden;
+}
+
+.fa-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.fa-modal[hidden] {
+  display: none !important;
 }
 
 .fa-detail-card {
+  width: min(440px, 100%);
+  max-height: min(80vh, 640px);
+  overflow: auto;
   border: 1px solid var(--hes-border-strong);
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 16px;
   background: var(--hes-bg-elevated);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.fa-detail-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .fa-detail-head {

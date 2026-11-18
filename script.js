@@ -2613,31 +2613,39 @@ const renderPostseasonResults = (g) => {
   `;
 };
 
+const renderFaTeamValue = (name, emblem) => `
+  <strong class="fa-detail-team">
+    ${emblem ? `<img class="fa-team-logo" src="${escapeHtml(emblem)}" alt="" />` : ""}
+    <span>${escapeHtml(name || "-")}</span>
+  </strong>
+`;
+
 const renderFaDetail = (player) => {
   const currentTeam = player?.signed ? (player.signed_team || player.team) : (player?.team || "-");
-  const emblem = player?.signed ? (player.signed_emblem || player.emblem) : player?.emblem;
+  const currentEmblem = player?.signed ? (player.signed_emblem || player.emblem) : player?.emblem;
   const rows = [
-    ["현재 소속", currentTeam],
-    ["원소속", player?.team || "-"],
-    ["계약 상태", player?.status || "협상 중"],
-    ["FA 등급", player?.grade ? `${player.grade}등급` : "확인된 기사 없음"],
+    ["현재 소속", renderFaTeamValue(currentTeam, currentEmblem)],
+    ["원소속", renderFaTeamValue(player?.team || "-", player?.emblem || "")],
+    ["계약 상태", `<strong>${escapeHtml(player?.status || "협상 중")}</strong>`],
+    ["FA 등급", `<strong>${escapeHtml(player?.grade ? `${player.grade}등급` : "확인된 기사 없음")}</strong>`],
   ];
   if (player?.signed) {
     rows.push(
-      ["계약 기간", player.years || "-"],
-      ["총액", player.total || "-"],
-      ["계약금", player.signing_bonus || "-"],
-      ["연봉", player.salary || "-"],
-      ["옵션", player.option || "-"],
+      ["계약 기간", `<strong>${escapeHtml(player.years || "-")}</strong>`],
+      ["총액", `<strong>${escapeHtml(player.total || "-")}</strong>`],
+      ["계약금", `<strong>${escapeHtml(player.signing_bonus || "-")}</strong>`],
+      ["연봉", `<strong>${escapeHtml(player.salary || "-")}</strong>`],
+      ["옵션", `<strong>${escapeHtml(player.option || "-")}</strong>`],
     );
   }
+  const headEmblem = currentEmblem || player?.emblem;
   const body = rows.map(([label, value]) => `
-    <div class="fa-detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+    <div class="fa-detail-row"><span>${escapeHtml(label)}</span>${value}</div>
   `).join("");
   return `
-    <div class="fa-detail-card">
+    <div class="fa-detail-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(player?.name || "FA 선수")}">
       <div class="fa-detail-head">
-        ${emblem ? `<img src="${escapeHtml(emblem)}" alt="" class="fa-team-logo" />` : ""}
+        ${headEmblem ? `<img src="${escapeHtml(headEmblem)}" alt="" class="fa-team-logo" />` : ""}
         <strong>${escapeHtml(player?.name || "")}</strong>
         <button type="button" class="fa-detail-close" aria-label="닫기">×</button>
       </div>
@@ -2648,10 +2656,19 @@ const renderFaDetail = (player) => {
   `;
 };
 
+const closeFaDetail = () => {
+  const panel = document.getElementById("fa-detail");
+  if (panel) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+  document.body.classList.remove("fa-modal-open");
+};
+
 const bindFaPlayerEvents = () => {
   const dataNode = document.getElementById("fa-player-data");
-  const panel = document.getElementById("fa-detail");
-  if (!dataNode || !panel) return;
+  if (!dataNode) return;
+  closeFaDetail();
   let players = [];
   try {
     players = JSON.parse(dataNode.value || dataNode.textContent || "[]");
@@ -2660,12 +2677,22 @@ const bindFaPlayerEvents = () => {
   }
   const byName = Object.fromEntries(players.map((player) => [player?.name, player]));
   const show = (player) => {
+    let panel = document.getElementById("fa-detail");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "fa-detail";
+      panel.className = "fa-modal";
+      document.body.appendChild(panel);
+    }
     panel.hidden = false;
     panel.innerHTML = renderFaDetail(player);
-    panel.querySelector(".fa-detail-close")?.addEventListener("click", () => {
-      panel.hidden = true;
-      panel.innerHTML = "";
+    document.body.classList.add("fa-modal-open");
+    const close = () => closeFaDetail();
+    panel.addEventListener("click", (event) => {
+      if (event.target === panel) close();
     });
+    panel.querySelector(".fa-detail-close")?.addEventListener("click", close);
+    panel.querySelector(".fa-detail-close")?.focus();
   };
   document.querySelectorAll("[data-fa-name]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2673,6 +2700,12 @@ const bindFaPlayerEvents = () => {
       if (player) show(player);
     });
   });
+  if (!document.body.dataset.faEscapeBound) {
+    document.body.dataset.faEscapeBound = "1";
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeFaDetail();
+    });
+  }
 };
 
 const renderFaSection = (g) => {
@@ -2721,7 +2754,6 @@ const renderFaSection = (g) => {
       ${fa.note ? `<p class="fa-note">${escapeHtml(fa.note)}${announced ? ` (${escapeHtml(announced)})` : ""}</p>` : ""}
       <p class="fa-note">이름을 누르면 소속, 계약 상태, 등급을 볼 수 있습니다. 계약이 끝난 선수는 굵은 글씨와 새 소속 팀 색 테두리로 표시합니다.${checked ? ` ${escapeHtml(checked)}` : ""}</p>
       <div class="fa-groups">${body}</div>
-      <div id="fa-detail" class="fa-detail" hidden></div>
       <textarea id="fa-player-data" hidden>${JSON.stringify(players).replace(/</g, "\\u003c")}</textarea>
       ${declinedText ? `<p class="fa-declined">자격은 있었으나 신청하지 않음: ${escapeHtml(declinedText)}</p>` : ""}
       ${fa.source_url ? `<p class="fa-source"><a href="${escapeHtml(fa.source_url)}" target="_blank" rel="noopener noreferrer">명단 출처</a></p>` : ""}
