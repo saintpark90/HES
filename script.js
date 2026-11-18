@@ -621,7 +621,7 @@ const bindWeatherChartEvents = () => {
   });
 };
 
-const renderWeatherHourlyChart = (hourly, dateLabel) => {
+const renderWeatherHourlyChart = (hourly, dateLabel, chartHint) => {
   const points = (Array.isArray(hourly) ? hourly : [])
     .map((item) => {
       const tempRaw = parseWeatherNumber(item?.temperature);
@@ -769,7 +769,7 @@ const renderWeatherHourlyChart = (hourly, dateLabel) => {
         </svg>
         <div class="weather-chart-tip" hidden></div>
       </div>
-      <p class="weather-chart-hint">경기시작 시각 기온만 숫자로 표시됩니다. 다른 시각은 점을 클릭하면 기온을 볼 수 있습니다.</p>
+      <p class="weather-chart-hint">${chartHint || "경기시작 시각 기온만 숫자로 표시됩니다. 다른 시각은 점을 클릭하면 기온을 볼 수 있습니다."}</p>
     </div>
   `;
 };
@@ -800,12 +800,18 @@ const renderWeatherSection = (g) => {
   })();
 
   return `
-    <section class="weather-section">
-      <h2 class="cmp-title">경기장 날씨</h2>
+    <details class="weather-section">
+      <summary>
+        <h2 class="cmp-title">경기장 날씨</h2>
+      </summary>
       <div class="weather-summary">
         <div class="weather-summary-row">
           <div class="weather-summary-item">지역: ${weather.region || "-"}</div>
-          <div class="weather-summary-item">경기 진행 확률: <strong>${weather.game_progress_probability ?? "-"}%</strong></div>
+          ${
+            g?.is_stove_league
+              ? ""
+              : `<div class="weather-summary-item">경기 진행 확률: <strong>${weather.game_progress_probability ?? "-"}%</strong></div>`
+          }
         </div>
         <div class="weather-summary-row">
           <div class="weather-summary-item">
@@ -819,9 +825,13 @@ const renderWeatherSection = (g) => {
         </div>
       </div>
       ${renderShadeSunMarkup()}
-      ${renderWeatherHourlyChart(weather.hourly, weatherDateLabel)}
+      ${renderWeatherHourlyChart(
+        weather.hourly,
+        weatherDateLabel,
+        g?.is_stove_league ? "점을 누르면 해당 시각의 기온을 볼 수 있습니다." : "",
+      )}
       ${renderWeatherCancelWarnings(weather)}
-    </section>
+    </details>
   `;
 };
 
@@ -1212,8 +1222,11 @@ const renderPlayoffRaceSection = (g) => {
   `;
 };
 
-const renderTeamRankings = (rankings, rankDate) => {
+const renderTeamRankings = (rankings, rankDate, options = {}) => {
   if (!Array.isArray(rankings) || rankings.length === 0) return "";
+  const title = options.finalSeason
+    ? `${options.finalSeason}시즌 최종 순위`
+    : `KBO 팀 순위 ${rankDate ? `(${rankDate} 기준)` : ""}`;
     const rows = rankings.map((row) => {
       const isHanwha = row?.team_id === "HH" || (row?.team_name || "").includes("한화");
       return `
@@ -1237,7 +1250,7 @@ const renderTeamRankings = (rankings, rankDate) => {
 
     return `
       <section class="rank-section">
-        <h2 class="cmp-title">KBO 팀 순위 ${rankDate ? `(${rankDate} 기준)` : ""}</h2>
+        <h2 class="cmp-title">${title}</h2>
         <div class="rank-table-wrap">
           <table class="rank-table">
             <thead>
@@ -1263,13 +1276,22 @@ const renderTeamRankings = (rankings, rankDate) => {
 
 const renderPlayerHighlightsSection = (g) => {
   const highlights = g?.player_highlights;
-  if (!highlights || typeof highlights !== "object") return "";
+  const heading = g?.is_stove_league ? "수상 예상" : "주요 선수 순위";
+  if (!highlights || typeof highlights !== "object") {
+    if (!g?.is_stove_league) return "";
+    return `
+      <section class="player-rank-section">
+        <h2 class="cmp-title">${heading}</h2>
+        <p class="player-rank-empty">수상 예상 정보를 불러오지 못했습니다.</p>
+      </section>
+    `;
+  }
   const titles = Array.isArray(highlights.titles) ? highlights.titles : [];
   const awards = Array.isArray(highlights.awards) ? highlights.awards : [];
   if (titles.length === 0 && awards.length === 0) {
     return `
       <section class="player-rank-section">
-        <h2 class="cmp-title">주요 선수 순위</h2>
+        <h2 class="cmp-title">${heading}</h2>
         <p class="player-rank-empty">이번 시즌 공식 타이틀 5위권이나 수상 유력 부문에 해당하는 한화 선수는 없습니다.</p>
       </section>
     `;
@@ -1325,7 +1347,7 @@ const renderPlayerHighlightsSection = (g) => {
 
   return `
     <section class="player-rank-section">
-      <h2 class="cmp-title">주요 선수 순위</h2>
+      <h2 class="cmp-title">${heading}</h2>
       ${
         titleCards
           ? `<h3 class="player-rank-sub">공식 타이틀 5위권</h3><div class="player-rank-grid">${titleCards}</div>`
@@ -2439,13 +2461,300 @@ const renderPostseasonBracket = (g) => {
   `;
 };
 
+const formatShortDate = (ymd) => {
+  const dt = parseYmdAsLocalDate(ymd || "");
+  if (!dt) return ymd || "";
+  return `${dt.getMonth() + 1}/${dt.getDate()}(${KOR_WEEKDAYS[dt.getDay()]})`;
+};
+
+const KBO_TEAM_META = {
+  한화: { id: "HH", color: "#ff6600" },
+  삼성: { id: "SS", color: "#074ca1" },
+  KT: { id: "KT", color: "#111111" },
+  KIA: { id: "HT", color: "#ea0029" },
+  LG: { id: "LG", color: "#c30452" },
+  두산: { id: "OB", color: "#1a2f6b" },
+  SSG: { id: "SK", color: "#ce0e2d" },
+  NC: { id: "NC", color: "#315288" },
+  롯데: { id: "LT", color: "#d50427" },
+  키움: { id: "WO", color: "#820024" },
+};
+
+const teamEmblemUrl = (name, seasonId) => {
+  const teamId = KBO_TEAM_META[name]?.id || "";
+  if (!teamId) return "";
+  const season = String(seasonId || "2026");
+  return `https://6ptotvmi5753.edge.naverncp.com/KBO_IMAGE/emblem/regular/${season}/emblem_${teamId}.png`;
+};
+
+const teamInk = (name) => KBO_TEAM_META[name]?.color || "";
+
+const renderPostseasonResults = (g) => {
+  const block = g?.postseason_results;
+  const series = Array.isArray(block?.series) ? block.series : [];
+  if (series.length === 0) return "";
+  const seasonId = String(block?.season || g?.season_id || "");
+  const rankings = Array.isArray(g?.team_rankings) ? g.team_rankings : [];
+  const rankOf = (name) => String(rankings.find((row) => row?.team_name === name)?.rank || "");
+  const bySeries = Object.fromEntries(series.map((item) => [item?.series, item]));
+  const order = ["WC", "SPO", "PO", "KS"];
+  const columns = order.map((key, index) => {
+    const item = bySeries[key];
+    if (!item) return "";
+    const games = Array.isArray(item.games) ? item.games : [];
+    const tally = {};
+    for (const game of games) {
+      if (game?.status !== "종료") continue;
+      const awayScore = Number(game.away_score);
+      const homeScore = Number(game.home_score);
+      if (!Number.isFinite(awayScore) || !Number.isFinite(homeScore) || awayScore === homeScore) continue;
+      const winner = awayScore > homeScore ? game.away_team : game.home_team;
+      tally[winner] = (tally[winner] || 0) + 1;
+    }
+    const names = [];
+    for (const game of games) {
+      for (const name of [game?.away_team, game?.home_team]) {
+        if (name && !names.includes(name)) names.push(name);
+      }
+    }
+    const opener = games.find((game) => game?.status !== "취소") || games[0] || {};
+    const higher = opener.home_team && names.includes(opener.home_team) ? opener.home_team : names[0];
+    const lower = names.find((name) => name !== higher) || "";
+    const higherWins = tally[higher] || 0;
+    const lowerWins = tally[lower] || 0;
+    const winnerName = higherWins === lowerWins ? "" : (higherWins > lowerWins ? higher : lower);
+    const tone = POSTSEASON_TEAM_TONE[KBO_TEAM_META[winnerName]?.id || ""] || "";
+    const teamRow = (name, wins, isWinner) => {
+      const emblem = teamEmblemUrl(name, seasonId);
+      const rank = rankOf(name);
+      return `
+        <div class="ps-bracket-team${isWinner ? " ps-bracket-team--winner" : ""}">
+          ${emblem ? `<img class="ps-bracket-emblem" src="${escapeHtml(emblem)}" alt="" />` : `<span class="ps-bracket-emblem-slot" aria-hidden="true"></span>`}
+          ${rank ? `<span class="ps-bracket-caption">정규 ${escapeHtml(rank)}위</span>` : ""}
+          <span class="ps-bracket-name">${escapeHtml(name || "-")}</span>
+          <span class="ps-bracket-wins">${wins}승</span>
+        </div>
+      `;
+    };
+    const chips = games.map((game, gameIndex) => {
+      const status = String(game?.status || "");
+      const when = formatShortDate(game?.date).replace(/\([^)]*\)/, "");
+      const score = status === "종료" ? `${game.away_score}-${game.home_score}` : status;
+      const text = `${gameIndex + 1}차전 ${when} ${score}`.trim();
+      const classes = ["ps-bracket-game"];
+      if (status === "종료") classes.push("ps-bracket-game--final");
+      else classes.push("ps-bracket-game--skip");
+      const relay = status === "종료"
+        ? getNaverGameRelayUrl({ game_id: game?.game_id, is_final: true, result: "" }, seasonId)
+        : "";
+      if (relay) {
+        return `<a class="${classes.join(" ")}" href="${escapeHtml(relay)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+      }
+      return `<span class="${classes.join(" ")}">${escapeHtml(text)}</span>`;
+    }).join("");
+    const seriesClass = String(key).toLowerCase();
+    const linked = index < order.length - 1 || (key === "KS" && winnerName) ? " ps-bracket-col--linked" : "";
+    return `
+      <div class="ps-bracket-col ps-bracket-col--${seriesClass}${tone ? ` ps-bracket-col--team-${tone}` : ""}${linked}">
+        <article class="ps-bracket-card">
+          <div class="ps-bracket-head">
+            <span class="ps-bracket-series sched-ps-${seriesClass}">${escapeHtml(item.label || key)}</span>
+            <span class="ps-bracket-state">${winnerName ? (key === "KS" ? "우승" : "진출") : ""}</span>
+          </div>
+          <div class="ps-bracket-teams">
+            ${teamRow(higher, higherWins, winnerName === higher)}
+            ${teamRow(lower, lowerWins, winnerName === lower)}
+          </div>
+          <div class="ps-bracket-games">${chips}</div>
+        </article>
+      </div>
+    `;
+  }).join("");
+  const ks = bySeries.KS;
+  const ksGames = Array.isArray(ks?.games) ? ks.games : [];
+  const ksTally = {};
+  for (const game of ksGames) {
+    if (game?.status !== "종료") continue;
+    const awayScore = Number(game.away_score);
+    const homeScore = Number(game.home_score);
+    if (!Number.isFinite(awayScore) || !Number.isFinite(homeScore) || awayScore === homeScore) continue;
+    const winner = awayScore > homeScore ? game.away_team : game.home_team;
+    ksTally[winner] = (ksTally[winner] || 0) + 1;
+  }
+  const champion = Object.entries(ksTally).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  const championTone = POSTSEASON_TEAM_TONE[KBO_TEAM_META[champion]?.id || ""] || "";
+  const championCol = champion
+    ? `
+      <div class="ps-bracket-col ps-bracket-col--ks${championTone ? ` ps-bracket-col--team-${championTone}` : ""}">
+        <article class="ps-bracket-card">
+          <div class="ps-bracket-head">
+            <span class="ps-bracket-series sched-ps-ks">우승</span>
+          </div>
+          <div class="ps-bracket-teams">
+            <div class="ps-bracket-team ps-bracket-team--winner">
+              <img class="ps-bracket-emblem" src="${escapeHtml(teamEmblemUrl(champion, seasonId))}" alt="" />
+              <span class="ps-bracket-name">${escapeHtml(champion)}</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    `
+    : "";
+  return `
+    <section class="ps-results-section">
+      <h2 class="cmp-title">${escapeHtml(seasonId)} 포스트시즌 결과</h2>
+      <div class="ps-bracket-scroll">
+        <div class="ps-bracket-board">
+          ${columns}
+          ${championCol}
+        </div>
+      </div>
+    </section>
+  `;
+};
+
+const renderFaDetail = (player) => {
+  const currentTeam = player?.signed ? (player.signed_team || player.team) : (player?.team || "-");
+  const emblem = player?.signed ? (player.signed_emblem || player.emblem) : player?.emblem;
+  const rows = [
+    ["현재 소속", currentTeam],
+    ["원소속", player?.team || "-"],
+    ["계약 상태", player?.status || "협상 중"],
+    ["FA 등급", player?.grade ? `${player.grade}등급` : "확인된 기사 없음"],
+  ];
+  if (player?.signed) {
+    rows.push(
+      ["계약 기간", player.years || "-"],
+      ["총액", player.total || "-"],
+      ["계약금", player.signing_bonus || "-"],
+      ["연봉", player.salary || "-"],
+      ["옵션", player.option || "-"],
+    );
+  }
+  const body = rows.map(([label, value]) => `
+    <div class="fa-detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+  `).join("");
+  return `
+    <div class="fa-detail-card">
+      <div class="fa-detail-head">
+        ${emblem ? `<img src="${escapeHtml(emblem)}" alt="" class="fa-team-logo" />` : ""}
+        <strong>${escapeHtml(player?.name || "")}</strong>
+        <button type="button" class="fa-detail-close" aria-label="닫기">×</button>
+      </div>
+      ${body}
+      ${player?.contract_detail ? `<p class="fa-detail-quote">${escapeHtml(player.contract_detail)}</p>` : ""}
+      ${player?.contract_source_url ? `<p class="fa-source"><a href="${escapeHtml(player.contract_source_url)}" target="_blank" rel="noopener noreferrer">계약 기사</a></p>` : ""}
+    </div>
+  `;
+};
+
+const bindFaPlayerEvents = () => {
+  const dataNode = document.getElementById("fa-player-data");
+  const panel = document.getElementById("fa-detail");
+  if (!dataNode || !panel) return;
+  let players = [];
+  try {
+    players = JSON.parse(dataNode.value || dataNode.textContent || "[]");
+  } catch (err) {
+    players = [];
+  }
+  const byName = Object.fromEntries(players.map((player) => [player?.name, player]));
+  const show = (player) => {
+    panel.hidden = false;
+    panel.innerHTML = renderFaDetail(player);
+    panel.querySelector(".fa-detail-close")?.addEventListener("click", () => {
+      panel.hidden = true;
+      panel.innerHTML = "";
+    });
+  };
+  document.querySelectorAll("[data-fa-name]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const player = byName[button.getAttribute("data-fa-name")];
+      if (player) show(player);
+    });
+  });
+};
+
+const renderFaSection = (g) => {
+  const fa = g?.fa_players;
+  if (!fa || typeof fa !== "object") return "";
+  const players = Array.isArray(fa.players) ? fa.players : [];
+  const declined = Array.isArray(fa.declined) ? fa.declined : [];
+  if (players.length === 0 && !g?.is_stove_league) return "";
+  const seasonId = g?.season_id || "";
+  const groups = [];
+  for (const player of players) {
+    const team = String(player?.team || "").trim() || "구단 미상";
+    const last = groups[groups.length - 1];
+    if (!last || last.team !== team) groups.push({ team, emblem: player?.emblem || teamEmblemUrl(team, seasonId), players: [player] });
+    else last.players.push(player);
+  }
+  const body = groups.length
+    ? groups.map((group) => {
+        const names = group.players.map((player) => {
+          const inkTeam = player?.signed ? (player.signed_team || player.team) : "";
+          const ink = teamInk(inkTeam);
+          const teamId = KBO_TEAM_META[inkTeam]?.id || "";
+          const signedClass = player?.signed ? " fa-name--signed" : "";
+          const style = ink ? ` style="--fa-ink:${ink}"` : "";
+          return `<button type="button" class="fa-name${signedClass}" data-fa-name="${escapeHtml(player?.name || "")}" data-team="${escapeHtml(teamId)}"${style}>${escapeHtml(player?.name || "")}</button>`;
+        }).join("");
+        return `
+          <div class="fa-group">
+            <div class="fa-group-name">
+              ${group.emblem ? `<img class="fa-team-logo" src="${escapeHtml(group.emblem)}" alt="" />` : ""}
+              <span>${escapeHtml(group.team)}</span>
+            </div>
+            <div class="fa-names">${names}</div>
+          </div>
+        `;
+      }).join("")
+    : `<p class="player-rank-empty">FA 명단을 불러오지 못했습니다.</p>`;
+  const declinedText = declined.length
+    ? declined.map((player) => `${player?.name || ""}(${player?.team || ""})`).join(", ")
+    : "";
+  const announced = fa.announced_on ? `공시 ${fa.announced_on}` : "";
+  const checked = fa.contract_checked_at ? `계약 소식 확인 ${formatUpdatedAt(fa.contract_checked_at)}` : "";
+  return `
+    <section class="fa-section">
+      <h2 class="cmp-title">FA 선수</h2>
+      ${fa.note ? `<p class="fa-note">${escapeHtml(fa.note)}${announced ? ` (${escapeHtml(announced)})` : ""}</p>` : ""}
+      <p class="fa-note">이름을 누르면 소속, 계약 상태, 등급을 볼 수 있습니다. 계약이 끝난 선수는 굵은 글씨와 새 소속 팀 색 테두리로 표시합니다.${checked ? ` ${escapeHtml(checked)}` : ""}</p>
+      <div class="fa-groups">${body}</div>
+      <div id="fa-detail" class="fa-detail" hidden></div>
+      <textarea id="fa-player-data" hidden>${JSON.stringify(players).replace(/</g, "\\u003c")}</textarea>
+      ${declinedText ? `<p class="fa-declined">자격은 있었으나 신청하지 않음: ${escapeHtml(declinedText)}</p>` : ""}
+      ${fa.source_url ? `<p class="fa-source"><a href="${escapeHtml(fa.source_url)}" target="_blank" rel="noopener noreferrer">명단 출처</a></p>` : ""}
+    </section>
+  `;
+};
+
 const renderGame = (g, refreshedAt) => {
   const pageTitle = document.querySelector("main.card > h1");
   if (pageTitle) {
-    pageTitle.textContent = g?.is_postseason ? "가을야구 경기정보" : "한화 이글스 경기정보";
+    pageTitle.textContent = g?.is_stove_league
+      ? "한화 이글스 스토브리그"
+      : (g?.is_postseason ? "가을야구 경기정보" : "한화 이글스 경기정보");
   }
   if (!g) {
     container.innerHTML = "<p>가까운 일정에서 한화 이글스 경기 정보를 찾지 못했습니다.</p>";
+    return;
+  }
+  if (g.is_stove_league) {
+    document.title = "한화 이글스 스토브리그";
+    container.innerHTML = `
+      <div class="updated-at">마지막 갱신: ${formatUpdatedAt(refreshedAt)}</div>
+      ${renderWeatherSection(g)}
+      ${renderPlayerHighlightsSection(g)}
+      ${renderTeamRankings(g.team_rankings, g.team_rank_date, { finalSeason: g.season_id || "" })}
+      ${renderPostseasonResults(g)}
+      ${renderFaSection(g)}
+      ${renderLatestNewsSection(g)}
+    `;
+    bindScheduleCalendarEvents();
+    bindSunShadowEvents();
+    bindWeatherChartEvents();
+    bindFaPlayerEvents();
     return;
   }
   if (g.is_postseason && g.postseason_label) {

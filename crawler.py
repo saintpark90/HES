@@ -1940,7 +1940,40 @@ def _fetch_eagles_tv_latest() -> Dict[str, Any]:
 def _build_naver_article_url(oid: str, aid: str) -> str:
     if not oid or not aid:
         return ""
-    return f"https://m.sports.naver.com/kbaseball/article/{oid}/{aid}"
+    return f"https://m.sports.naver.com/kbo/article/{oid}/{aid}"
+
+
+def _naver_sports_headers() -> Dict[str, str]:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://m.sports.naver.com/myteam/kbo/team/HH/news",
+        "Origin": "https://m.sports.naver.com",
+    }
+
+
+def _naver_get(
+    url: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: int = 20,
+):
+    """Naver sports API stalls plain requests clients. Match a browser TLS fingerprint."""
+    hdrs = headers or _naver_sports_headers()
+    from curl_cffi import requests as curl_requests
+
+    response = curl_requests.get(
+        url,
+        params=params,
+        headers=hdrs,
+        timeout=timeout,
+        impersonate="chrome",
+    )
+    response.raise_for_status()
+    return response
 
 
 def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
@@ -1949,22 +1982,24 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
         "page": 1,
         "pageSize": max(1, min(limit, 20)),
         "sort": "MYTEAM",
-        "isPhoto": "Y",
+        "isPhoto": "N",
         "date_flag": "Y",
         "categoryId": "kbo",
     }
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://m.sports.naver.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://m.sports.naver.com/myteam/kbo/team/HH/news",
     }
     try:
-        response = requests.get(
+        response = _naver_get(
             NAVER_SPORTS_NEWS_API_URL,
             params=params,
-            timeout=10,
+            timeout=20,
             headers=headers,
         )
-        response.raise_for_status()
         payload = response.json()
     except Exception:
         return []
@@ -3184,6 +3219,77 @@ def _resolve_pitcher_id_from_search(
     return m.group(1) if m else ""
 
 
+def _finalize_rankings(rankings: list) -> list[dict[str, str]]:
+    """승률 기준으로 순위를 다시 매긴다. 원본 ranking 필드는 팀 나열 순서인 경우가 있다."""
+    rows = [dict(row) for row in rankings if isinstance(row, dict)]
+
+    def sort_key(row: dict) -> tuple[float, int]:
+        try:
+            rate = float(row.get("win_rate") or 0)
+        except (TypeError, ValueError):
+            rate = -1.0
+        try:
+            wins = int(float(row.get("wins") or 0))
+        except (TypeError, ValueError):
+            wins = 0
+        return (rate, wins)
+
+    rows.sort(key=sort_key, reverse=True)
+    for index, row in enumerate(rows, start=1):
+        row["rank"] = str(index)
+        raw = str(row.get("games_behind") or "").strip()
+        try:
+            number = float(raw)
+        except ValueError:
+            continue
+        row["games_behind"] = str(int(number)) if number == int(number) else f"{number:.1f}"
+    return rows
+
+
+def _rankings_from_kbo_daily_table(table, season: str) -> list[dict[str, str]]:
+    """KBO 일자별 순위표. 첫 열 번호는 승률 순이 아니라서 승률로 다시 매긴다."""
+    parsed: list[dict[str, str]] = []
+    for tr in table.find_all("tr"):
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        if len(cells) < 10:
+            continue
+        team_name = cells[1].strip()
+        team_id = TEAM_NAME_TO_ID.get(team_name, "")
+        emblem = f"{KBO_EMBLEM_BASE}/{season}/emblem_{team_id}.png" if team_id else ""
+        parsed.append(
+            {
+                "rank": "",
+                "team_name": team_name,
+                "team_id": team_id,
+                "games": cells[2],
+                "wins": cells[3],
+                "losses": cells[4],
+                "draws": cells[5],
+                "win_rate": cells[6],
+                "games_behind": cells[7],
+                "last10": cells[8],
+                "streak": cells[9],
+                "emblem": emblem,
+            }
+        )
+
+    def sort_key(row: dict[str, str]) -> tuple[float, int]:
+        try:
+            rate = float(row.get("win_rate") or 0)
+        except ValueError:
+            rate = -1.0
+        try:
+            wins = int(str(row.get("wins") or "0"))
+        except ValueError:
+            wins = 0
+        return (rate, wins)
+
+    parsed.sort(key=sort_key, reverse=True)
+    for index, row in enumerate(parsed, start=1):
+        row["rank"] = str(index)
+    return parsed
+
+
 def _fetch_team_rank_daily() -> Dict[str, Any]:
     """Fetch team rankings from Naver Sports API and head-to-head from KBO page."""
     season = str(date.today().year)
@@ -3195,23 +3301,21 @@ def _fetch_team_rank_daily() -> Dict[str, Any]:
     rankings: list[dict[str, str]] = []
     rank_date = datetime.now().strftime("%Y.%m.%d")
     try:
-        ranking_resp = requests.get(
+        ranking_resp = _naver_get(
             NAVER_KBO_TEAM_RANK_URL.format(season=season),
-            timeout=10,
+            timeout=20,
             headers=naver_headers,
         )
-        ranking_resp.raise_for_status()
         ranking_payload = ranking_resp.json()
         season_team_stats = (
             (ranking_payload.get("result") or {}).get("seasonTeamStats") or []
         )
 
-        last10_resp = requests.get(
+        last10_resp = _naver_get(
             NAVER_KBO_LAST10_URL.format(season=season),
-            timeout=10,
+            timeout=20,
             headers=naver_headers,
         )
-        last10_resp.raise_for_status()
         last10_payload = last10_resp.json()
         last10_stats = (
             (last10_payload.get("result") or {}).get("seasonTeamLastTenGameStats") or []
@@ -3269,8 +3373,10 @@ def _fetch_team_rank_daily() -> Dict[str, Any]:
         return {"rankings": [], "head_to_head": [], "rank_date": ""}
 
     tables = soup.find_all("table")
+    if not rankings and tables:
+        rankings = _rankings_from_kbo_daily_table(tables[0], season)
     if len(tables) < 2:
-        return {"rankings": rankings, "head_to_head": [], "rank_date": rank_date}
+        return {"rankings": _finalize_rankings(rankings), "head_to_head": [], "rank_date": rank_date}
 
     head_to_head: list[dict[str, str]] = []
     h2h_table = tables[1]
@@ -3292,7 +3398,7 @@ def _fetch_team_rank_daily() -> Dict[str, Any]:
                 record_map[col_team] = value
         head_to_head.append({"team_name": team_name, "records": record_map})
 
-    return {"rankings": rankings, "head_to_head": head_to_head, "rank_date": rank_date}
+    return {"rankings": _finalize_rankings(rankings), "head_to_head": head_to_head, "rank_date": rank_date}
 
 
 def _find_head_to_head_record(
@@ -3887,12 +3993,6 @@ _PLAYER_HIGHLIGHT_CACHE: Dict[str, Any] = {"at": 0.0, "season": "", "data": None
 _PLAYER_ELIGIBILITY_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
-def _naver_sports_headers() -> Dict[str, str]:
-    return {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://m.sports.naver.com/",
-        "Origin": "https://m.sports.naver.com",
-    }
 
 
 def _is_hanwha_player_row(row: Dict[str, Any]) -> bool:
@@ -3921,7 +4021,7 @@ def _fetch_sorted_players(
     page_size: int,
 ) -> list[Dict[str, Any]]:
     try:
-        response = requests.get(
+        response = _naver_get(
             NAVER_KBO_PLAYERS_URL.format(season=season),
             params={
                 "playerType": player_type,
@@ -3929,10 +4029,8 @@ def _fetch_sorted_players(
                 "sortField": sort_field,
                 "sortDirection": sort_direction,
             },
-            headers=_naver_sports_headers(),
             timeout=20,
         )
-        response.raise_for_status()
         batch = ((response.json().get("result") or {}).get("seasonPlayerStats") or [])
     except Exception:
         return []
@@ -4384,12 +4482,10 @@ def _is_dh_box_position(text: str) -> bool:
 
 def _fetch_team_game_counts(season: str) -> Dict[str, int]:
     try:
-        response = requests.get(
+        response = _naver_get(
             NAVER_KBO_TEAM_RANK_URL.format(season=season),
-            headers=_naver_sports_headers(),
-            timeout=15,
+            timeout=20,
         )
-        response.raise_for_status()
         rows = ((response.json().get("result") or {}).get("seasonTeamStats") or [])
     except Exception:
         return {}
@@ -5771,13 +5867,9 @@ def _build_postseason_snapshot(
     bracket = _build_postseason_bracket(ranking_rows, today, season)
     rounds = bracket.get("rounds") or []
     picked = _pick_open_bracket_game(rounds, today)
-    if picked:
-        rnd, game = picked
-    elif rounds and (rounds[-1].get("games") or []):
-        rnd = rounds[-1]
-        game = rnd["games"][-1]
-    else:
+    if not picked:
         return None
+    rnd, game = picked
     for item in rounds:
         item["is_current"] = bool(picked) and item.get("series") == rnd.get("series")
     fixture = _fixture_from_bracket_game(rnd, game, head_to_head, season)
@@ -5816,6 +5908,545 @@ def _build_postseason_snapshot(
         }
     )
     return fixture
+
+
+_POSTSEASON_SR_SERIES = {
+    "4": ("WC", "와일드카드"),
+    "3": ("SPO", "준플레이오프"),
+    "5": ("PO", "플레이오프"),
+    "7": ("KS", "한국시리즈"),
+}
+_FA_TEAM_NAMES = {"한화", "삼성", "KT", "KIA", "LG", "두산", "SSG", "NC", "롯데", "키움"}
+
+
+def _fetch_postseason_results(today: date) -> Dict[str, Any]:
+    """정규시즌 일정표에 없는 가을야구 실제 경기만 KBO 일정 API에서 모은다."""
+    start = date(today.year, 10, 1)
+    end = min(today, date(today.year, 11, 30))
+    if end < start:
+        return {"season": str(today.year), "series": []}
+    dates: list[date] = []
+    cursor = start
+    while cursor <= end:
+        dates.append(cursor)
+        cursor += timedelta(days=1)
+
+    def load_day(target: date) -> list[Dict[str, str]]:
+        try:
+            games = _fetch_games(target)
+        except Exception:
+            return []
+        rows: list[Dict[str, str]] = []
+        for game in games:
+            series_id = str(game.get("SR_ID") or "")
+            mapped = _POSTSEASON_SR_SERIES.get(series_id)
+            if not mapped:
+                continue
+            applied = _series_row_from_api_game(game)
+            rows.append(
+                {
+                    "series": mapped[0],
+                    "label": mapped[1],
+                    "date": target.isoformat(),
+                    "game_time": str(game.get("G_TM") or "").strip(),
+                    "stadium": str(game.get("S_NM") or "").strip(),
+                    "away_team": str(game.get("AWAY_NM") or "").strip(),
+                    "home_team": str(game.get("HOME_NM") or "").strip(),
+                    "away_score": str(applied.get("away_score") or "").strip(),
+                    "home_score": str(applied.get("home_score") or "").strip(),
+                    "status": str(applied.get("status") or "").strip(),
+                    "result": str(applied.get("result") or "").strip(),
+                    "game_id": str(game.get("G_ID") or "").strip(),
+                }
+            )
+        return rows
+
+    found: Dict[str, Dict[str, str]] = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for day_rows in pool.map(load_day, dates):
+            for row in day_rows:
+                key = row["game_id"] or f"{row['date']}-{row['away_team']}-{row['home_team']}"
+                found[key] = row
+
+    grouped: Dict[str, list[Dict[str, str]]] = {}
+    for row in found.values():
+        grouped.setdefault(row["series"], []).append(row)
+
+    series_payload: list[Dict[str, Any]] = []
+    for series_key, _label in (("WC", "와일드카드"), ("SPO", "준플레이오프"), ("PO", "플레이오프"), ("KS", "한국시리즈")):
+        games = sorted(grouped.get(series_key) or [], key=lambda item: (item["date"], item["game_id"]))
+        if not games:
+            continue
+        wins: Dict[str, int] = {}
+        for game in games:
+            if game["status"] != "종료":
+                continue
+            try:
+                away_score = int(game["away_score"])
+                home_score = int(game["home_score"])
+            except ValueError:
+                continue
+            if away_score == home_score:
+                continue
+            winner = game["away_team"] if away_score > home_score else game["home_team"]
+            wins[winner] = wins.get(winner, 0) + 1
+        summary = " · ".join(
+            f"{name} {count}승"
+            for name, count in sorted(wins.items(), key=lambda item: (-item[1], item[0]))
+        )
+        series_payload.append(
+            {
+                "series": series_key,
+                "label": games[0]["label"],
+                "summary": summary,
+                "games": games,
+            }
+        )
+    return {"season": str(today.year), "series": series_payload}
+
+
+def _normalize_fa_team(raw: str) -> str:
+    text = re.sub(r"\s+", "", str(raw or "")).lower()
+    for key, name in (
+        ("한화", "한화"),
+        ("삼성", "삼성"),
+        ("kt", "KT"),
+        ("kia", "KIA"),
+        ("lg", "LG"),
+        ("두산", "두산"),
+        ("ssg", "SSG"),
+        ("nc", "NC"),
+        ("롯데", "롯데"),
+        ("키움", "키움"),
+    ):
+        if key in text:
+            return name
+    return ""
+
+
+def _split_fa_names(blob: str) -> list[str]:
+    text = re.sub(r"[와과]", ",", blob)
+    skip = {
+        "가운데", "이상", "선수", "명단", "공시", "자격", "자격을", "승인", "신청",
+        "자유", "계약", "구단", "얻은", "포함", "시장", "공시했다", "선수들",
+    }
+    names: list[str] = []
+    for part in text.split(","):
+        for token in re.findall(r"[가-힣]{2,4}", part):
+            if token in skip:
+                continue
+            names.append(token)
+    return names
+
+
+def _fa_groups_in(text: str) -> list[Dict[str, Any]]:
+    players: list[Dict[str, Any]] = []
+    pattern = re.compile(r"([가-힣][가-힣,\s와과]{1,80}?)\((?:이상\s*)?([^)]{2,24})\)")
+    for match in pattern.finditer(text):
+        team = _normalize_fa_team(match.group(2))
+        if team not in _FA_TEAM_NAMES:
+            continue
+        for name in _split_fa_names(match.group(1)):
+            players.append({"name": name, "team": team})
+    return players
+
+
+def _parse_fa_article_text(text: str) -> Dict[str, Any]:
+    compact = re.sub(r"\s+", " ", text or "")
+    split_at = compact.find("신청하지")
+    if split_at > 0:
+        marker = compact.rfind("가운데", 0, split_at)
+        if marker < 0:
+            marker = max(0, split_at - 220)
+        approved_zone = compact[:marker]
+        declined_zone = compact[marker : split_at + 40]
+    else:
+        approved_zone = compact
+        declined_zone = ""
+    approved = _fa_groups_in(approved_zone)
+    declined = _fa_groups_in(declined_zone)
+    declined_names = {item["name"] for item in declined}
+    players: list[Dict[str, Any]] = []
+    seen = set()
+    for item in approved:
+        if item["name"] in declined_names or item["name"] in seen:
+            continue
+        seen.add(item["name"])
+        players.append(item)
+    declined_unique: list[Dict[str, Any]] = []
+    seen_declined = set()
+    for item in declined:
+        if item["name"] in seen_declined:
+            continue
+        seen_declined.add(item["name"])
+        declined_unique.append({"name": item["name"], "team": item["team"]})
+    return {"players": players, "declined": declined_unique}
+
+
+def _fa_team_id(team: str) -> str:
+    return TEAM_NAME_TO_ID.get(str(team or "").strip(), "")
+
+
+def _fa_emblem(team: str, season: str) -> str:
+    team_id = _fa_team_id(team)
+    if not team_id:
+        return ""
+    return f"{KBO_EMBLEM_BASE}/{season}/emblem_{team_id}.png"
+
+
+def _strip_news_html(value: str) -> str:
+    text = re.sub(r"<[^>]+>", "", str(value or ""))
+    text = text.replace("&amp;", "&").replace("&quot;", " ").replace("&#39;", "'")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _news_result_cards(html: str) -> list[Dict[str, str]]:
+    cards: list[Dict[str, str]] = []
+    body_by_url: Dict[str, str] = {}
+    for href, body in re.findall(
+        r'href="(https://[^"]+)"[^>]*>\s*<span class="[^"]*body1"[^>]*>(.*?)</span>',
+        html,
+        flags=re.S,
+    ):
+        url = href.replace("&amp;", "&")
+        body_by_url.setdefault(url, _strip_news_html(body))
+    seen = set()
+    for href, title in re.findall(
+        r'href="(https://[^"]+)"[^>]*>\s*<span class="[^"]*headline1"[^>]*>(.*?)</span>',
+        html,
+        flags=re.S,
+    ):
+        url = href.replace("&amp;", "&")
+        if url in seen:
+            continue
+        seen.add(url)
+        cards.append(
+            {
+                "url": url,
+                "title": _strip_news_html(title),
+                "body": body_by_url.get(url, ""),
+            }
+        )
+    return cards
+
+
+def _search_news_cards(query: str) -> list[Dict[str, str]]:
+    try:
+        response = _naver_get(
+            "https://search.naver.com/search.naver",
+            params={"where": "news", "query": query, "sort": "1", "pd": "1"},
+            timeout=20,
+        )
+    except Exception:
+        return []
+    return _news_result_cards(response.text)
+
+
+def _fetch_article_text(url: str) -> str:
+    try:
+        if "naver.com" in url:
+            response = _naver_get(url, timeout=15)
+            html = response.text
+        else:
+            response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+            response.raise_for_status()
+            response.encoding = response.apparent_encoding or "utf-8"
+            html = response.text
+    except Exception:
+        return ""
+    return _strip_news_html(BeautifulSoup(html, "html.parser").get_text(" ", strip=True))
+
+
+def _teams_mentioned(text: str) -> list[str]:
+    found: list[str] = []
+    patterns = (
+        ("한화", "한화"),
+        ("삼성", "삼성"),
+        ("(?<![A-Za-z])kt(?![A-Za-z])", "KT"),
+        ("(?<![A-Za-z])kia(?![A-Za-z])", "KIA"),
+        ("(?<![A-Za-z])lg(?![A-Za-z])", "LG"),
+        ("두산", "두산"),
+        ("(?<![A-Za-z])ssg(?![A-Za-z])", "SSG"),
+        ("(?<![A-Za-z])nc(?![A-Za-z])", "NC"),
+        ("롯데", "롯데"),
+        ("키움", "키움"),
+    )
+    for pattern, name in patterns:
+        if re.search(pattern, text, flags=re.I) and name not in found:
+            found.append(name)
+    return found
+
+
+def _grab_money(label: str, text: str) -> str:
+    match = re.search(label + r"\s*([0-9][0-9,\s억만]*원)", text)
+    if not match:
+        return ""
+    return re.sub(r"\s+", "", match.group(1))
+
+
+def _contract_from_text(name: str, text: str, source_url: str, source_title: str) -> Optional[Dict[str, str]]:
+    if name not in text:
+        return None
+    chunks = re.split(r"(?<=[다요]\.)\s+|(?<=밝혔다\.)\s+", text)
+    chosen = ""
+    for chunk in chunks:
+        if name not in chunk:
+            continue
+        if not re.search(rf"{re.escape(name)}.{{0,90}}(?:체결했|계약했|사인했)|(?:체결했|계약했|사인했).{{0,50}}{re.escape(name)}", chunk):
+            continue
+        if re.search(r"체결할|계약할 예정", chunk) and "체결했" not in chunk and "계약했" not in chunk:
+            continue
+        chosen = chunk
+        break
+    if not chosen:
+        return None
+    prefix = chosen.split(name, 1)[0]
+    teams_before = _teams_mentioned(prefix[-80:])
+    teams = _teams_mentioned(chosen)
+    signed_team = teams_before[-1] if teams_before else (teams[0] if len(teams) == 1 else "")
+    if not signed_team and "잔류" in chosen:
+        signed_team = ""
+    years = ""
+    year_match = re.search(r"(\d+)\s*년", chosen)
+    if year_match:
+        years = f"{year_match.group(1)}년"
+    total = _grab_money(r"(?:총액|최대)", chosen)
+    signing_bonus = _grab_money(r"계약금", chosen)
+    salary = _grab_money(r"연봉(?:\s*총액)?", chosen)
+    option = _grab_money(r"옵션", chosen) or _grab_money(r"인센티브", chosen)
+    return {
+        "signed_team": signed_team,
+        "years": years,
+        "total": total,
+        "signing_bonus": signing_bonus,
+        "salary": salary,
+        "option": option,
+        "source_url": source_url,
+        "source_title": source_title,
+        "detail": re.sub(r"\s+", " ", chosen).strip()[:280],
+    }
+
+
+def _contract_score(info: Dict[str, str]) -> int:
+    return sum(1 for key in ("years", "total", "signing_bonus", "salary", "option", "signed_team") if info.get(key))
+
+
+def _apply_fa_grades(players: list[Dict[str, Any]], texts: list[str]) -> None:
+    by_name = {str(item.get("name") or ""): item for item in players}
+    blob = "\n".join(texts)
+    def set_grade(name: str, grade: str) -> None:
+        player = by_name.get(name)
+        if player and grade in {"A", "B", "C"} and not player.get("grade"):
+            player["grade"] = grade
+
+    listed = re.search(r"A등급은\s*\d+\s*명으로[, ]+(.{8,180}?포함)", blob)
+    if listed:
+        for name in by_name:
+            if name and name in listed.group(1):
+                set_grade(name, "A")
+    for name, grade in re.findall(r"([가-힣]{2,4})\(\s*([ABC])(?:등급)?\s*\)", blob):
+        set_grade(name, grade)
+    for name, grade in re.findall(r"([가-힣]{2,4})\([^)]{0,20}?([ABC])등급", blob):
+        set_grade(name, grade)
+    for name, grade in re.findall(r"([가-힣]{2,4}).{0,24}?([ABC])등급으로", blob):
+        set_grade(name, grade)
+    for sentence in re.split(r"(?<=다\.)\s+|(?<=다\.)", blob):
+        matched = re.search(r"모두\s*([ABC])등급", sentence)
+        if not matched:
+            continue
+        head = sentence[: matched.start()]
+        for name in by_name:
+            if name and name in head:
+                set_grade(name, matched.group(1))
+    for left, right, grade in re.findall(
+        r"([가-힣]{2,4})·([가-힣]{2,4})(?:는|은)?\s*둘 다\s*([ABC])등급",
+        blob,
+    ):
+        set_grade(left, grade)
+        set_grade(right, grade)
+
+
+def _enrich_fa_market(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """승인 명단에 팀 로고를 붙이고, 최신 기사에서 등급과 체결된 계약을 갱신한다."""
+    season = str(_today_kst().year)
+    players = payload.get("players") if isinstance(payload.get("players"), list) else []
+    for player in players:
+        team = str(player.get("team") or "")
+        player["team_id"] = _fa_team_id(team)
+        player["emblem"] = _fa_emblem(team, season)
+        player["grade"] = str(player.get("grade") or "")
+        player["status"] = "협상 중"
+        player["signed"] = False
+        player["signed_team"] = ""
+        player["signed_team_id"] = ""
+        player["signed_emblem"] = ""
+        player["years"] = ""
+        player["total"] = ""
+        player["signing_bonus"] = ""
+        player["salary"] = ""
+        player["option"] = ""
+        player["contract_source_url"] = ""
+        player["contract_source_title"] = ""
+        player["contract_detail"] = ""
+    for player in payload.get("declined") or []:
+        if not isinstance(player, dict):
+            continue
+        team = str(player.get("team") or "")
+        player["team_id"] = _fa_team_id(team)
+        player["emblem"] = _fa_emblem(team, season)
+        player["status"] = "미신청"
+        player["signed"] = False
+
+    cards: list[Dict[str, str]] = []
+    for query in ("FA 계약 체결", "FA 잔류 계약", "FA A등급 명단"):
+        cards.extend(_search_news_cards(query))
+    texts = [f"{card.get('title') or ''} {card.get('body') or ''}".strip() for card in cards]
+    fetched = 0
+    ranked_cards = sorted(
+        cards,
+        key=lambda card: 0 if re.search(r"\([ABC]\)", card.get("body") or "") else 1,
+    )
+    for card in ranked_cards:
+        title = card.get("title") or ""
+        if fetched >= 8:
+            break
+        body = card.get("body") or ""
+        if not re.search(r"등급|체결|오피셜|공식|잔류", title) and not re.search(r"[ABC]등급|\([ABC]\)", body):
+            continue
+        article = _fetch_article_text(card.get("url") or "")
+        if article:
+            texts.append(article)
+            card["article"] = article
+            fetched += 1
+    _apply_fa_grades(players, texts)
+
+    best: Dict[str, Dict[str, str]] = {}
+    for card in cards:
+        blob = " ".join(
+            part
+            for part in (card.get("title"), card.get("body"), card.get("article"))
+            if part
+        )
+        for player in players:
+            name = str(player.get("name") or "")
+            found = _contract_from_text(name, blob, card.get("url") or "", card.get("title") or "")
+            if not found:
+                continue
+            if not found.get("signed_team") and "잔류" in (found.get("detail") or ""):
+                found["signed_team"] = str(player.get("team") or "")
+            previous = best.get(name)
+            if previous is None or _contract_score(found) >= _contract_score(previous):
+                best[name] = found
+    for player in players:
+        found = best.get(str(player.get("name") or ""))
+        if not found or not found.get("signed_team"):
+            continue
+        signed_team = found["signed_team"]
+        player["signed"] = True
+        player["status"] = "계약 완료"
+        player["signed_team"] = signed_team
+        player["signed_team_id"] = _fa_team_id(signed_team)
+        player["signed_emblem"] = _fa_emblem(signed_team, season)
+        player["years"] = found.get("years") or ""
+        player["total"] = found.get("total") or ""
+        player["signing_bonus"] = found.get("signing_bonus") or ""
+        player["salary"] = found.get("salary") or ""
+        player["option"] = found.get("option") or ""
+        player["contract_source_url"] = found.get("source_url") or ""
+        player["contract_source_title"] = found.get("source_title") or ""
+        player["contract_detail"] = found.get("detail") or ""
+    payload["contract_checked_at"] = datetime.now(KST).replace(microsecond=0).isoformat()
+    return payload
+
+
+def _fetch_fa_players() -> Dict[str, Any]:
+    """이번 스토브리그 FA 승인 명단. KBO 공시를 전한 최신 기사에서 구단별 이름을 읽는다."""
+    empty: Dict[str, Any] = {
+        "announced_on": "",
+        "source_title": "",
+        "source_url": "",
+        "players": [],
+        "declined": [],
+        "note": "",
+    }
+    def accept(parsed: Dict[str, Any], source_url: str, source_title: str, body: str) -> Optional[Dict[str, Any]]:
+        if len(parsed.get("players") or []) < 15:
+            return None
+        announced_on = ""
+        notice = re.search(r"(\d{1,2})\s*일.{0,80}?(?:명단을\s*)?(?:공시|발표)", body)
+        if notice:
+            day = int(notice.group(1))
+            if 1 <= day <= 31:
+                announced_on = f"{_today_kst().year}-11-{day:02d}"
+        if not announced_on:
+            dates = [
+                f"{year}-{int(month):02d}-{int(day):02d}"
+                for year, month, day in re.findall(r"(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})", body)
+            ]
+            announced_on = max(dates) if dates else ""
+        return {
+            "announced_on": announced_on,
+            "source_title": source_title,
+            "source_url": source_url,
+            "players": parsed["players"],
+            "declined": parsed.get("declined") or [],
+            "note": "KBO가 공시한 FA 승인 선수입니다. 승인 선수는 공시 다음 날부터 협상할 수 있습니다.",
+        }
+
+    cards = _search_news_cards("KBO FA 승인 선수 명단 공시")
+    for card in cards[:8]:
+        url = card.get("url") or ""
+        article_text = _fetch_article_text(url)
+        if not article_text:
+            continue
+        accepted = accept(_parse_fa_article_text(article_text), url, card.get("title") or "", article_text)
+        if accepted:
+            return _enrich_fa_market(accepted)
+    return empty
+
+
+def _build_stove_snapshot(
+    *,
+    today: date,
+    rank_daily: Dict[str, Any],
+    latest_news: list,
+) -> Dict[str, Any]:
+    season = str(today.year)
+    rankings = rank_daily.get("rankings", []) if isinstance(rank_daily, dict) else []
+    try:
+        weather_info = _build_game_weather_info(today, "", "대전 한화생명볼파크")
+    except Exception:
+        weather_info = {}
+    if isinstance(weather_info, dict) and weather_info:
+        weather_info = dict(weather_info)
+        weather_info["region"] = "대전 한화생명볼파크"
+        weather_info["stove"] = True
+    try:
+        player_highlights = _fetch_hanwha_player_highlights(season)
+    except Exception:
+        player_highlights = None
+    try:
+        postseason_results = _fetch_postseason_results(today)
+    except Exception:
+        postseason_results = {"season": season, "series": []}
+    try:
+        fa_players = _fetch_fa_players()
+    except Exception:
+        fa_players = {"players": [], "declined": [], "note": ""}
+    return {
+        "is_stove_league": True,
+        "is_postseason": False,
+        "season_id": season,
+        "game_date_ymd": today.isoformat(),
+        "stadium": "대전 한화생명볼파크",
+        "team_rankings": rankings if isinstance(rankings, list) else [],
+        "team_rank_date": rank_daily.get("rank_date", "") if isinstance(rank_daily, dict) else "",
+        "weather_info": weather_info or {},
+        "latest_news": latest_news or [],
+        "player_highlights": player_highlights,
+        "postseason_results": postseason_results,
+        "fa_players": fa_players,
+    }
 
 
 def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
@@ -5961,7 +6592,7 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
                 "league_results_games": league_results_games,
                 }
             )
-    return _build_postseason_snapshot(
+    postseason = _build_postseason_snapshot(
         today=today,
         rank_daily=rank_daily,
         eagles_tv=eagles_tv,
@@ -5969,4 +6600,11 @@ def get_next_hanwha_game(max_days_ahead: int = 30) -> Optional[Dict[str, Any]]:
         register_moves=register_moves,
         league_results_ymd=league_results_ymd,
         league_results_games=league_results_games,
+    )
+    if postseason:
+        return postseason
+    return _build_stove_snapshot(
+        today=today,
+        rank_daily=rank_daily,
+        latest_news=latest_news,
     )

@@ -1256,6 +1256,8 @@ html[data-theme="dark"] .weather-chart-tip::after {
 .playoff-race-section,
 .player-rank-section,
 .ps-bracket,
+.ps-results-section,
+.fa-section,
 .rank-section,
 .yesterday-league-section {
   margin-top: 24px;
@@ -1810,6 +1812,178 @@ html[data-theme="dark"] .playoff-race-card--wins {
   background: var(--hes-bg-hanwha);
   color: var(--hes-text);
   font-weight: 600;
+}
+
+.ps-result-card,
+.fa-group {
+  border: 1px solid var(--hes-border-strong);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  background: var(--hes-bg-elevated);
+}
+
+.ps-result-head,
+.ps-result-game {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.ps-result-head h3,
+.fa-group-name {
+  margin: 0;
+  font-size: 15px;
+}
+
+.ps-result-game {
+  padding: 6px 0;
+  border-top: 1px solid var(--hes-border-subtle);
+  font-size: 14px;
+}
+
+.ps-result-match {
+  flex: 1;
+  text-align: center;
+}
+
+.ps-result-place {
+  color: var(--hes-text-muted);
+  font-size: 12px;
+}
+
+.fa-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.fa-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fa-name {
+  border: 1px solid var(--hes-border-strong);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+.fa-name--hanwha,
+.fa-group--hanwha {
+  border-color: var(--hes-accent);
+}
+
+.fa-note,
+.fa-declined,
+.fa-source {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--hes-text-muted);
+}
+
+.weather-section > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.weather-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.weather-section > summary .cmp-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.weather-section > summary .cmp-title::after {
+  content: "펼치기";
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hes-text-muted);
+}
+
+.weather-section[open] > summary .cmp-title::after {
+  content: "접기";
+}
+
+.fa-group-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fa-team-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.fa-name {
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fa-name--signed {
+  font-weight: 800;
+  border-width: 2px;
+  border-color: var(--fa-ink, var(--hes-accent));
+  color: var(--fa-ink, inherit);
+}
+
+html[data-theme="dark"] .fa-name--signed[data-team="KT"] {
+  --fa-ink: #f2f2f2;
+  color: #f2f2f2;
+  border-color: #f2f2f2;
+}
+
+.fa-detail {
+  margin-top: 12px;
+}
+
+.fa-detail-card {
+  border: 1px solid var(--hes-border-strong);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--hes-bg-elevated);
+}
+
+.fa-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fa-detail-close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.fa-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.fa-detail-quote {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--hes-text-muted);
 }
 
 .sched-head {

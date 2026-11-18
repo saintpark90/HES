@@ -242,7 +242,10 @@ def build() -> None:
     has_game = bool(game_info)
     updated_at = datetime.now(KST).replace(microsecond=0).isoformat()
 
-    if has_game and game_info.get("is_postseason"):
+    if has_game and game_info.get("is_stove_league"):
+        og_title = "한화 이글스 스토브리그"
+        og_description = "2026시즌 최종 순위, 포스트시즌 결과, FA 명단과 대전 구장 날씨"
+    elif has_game and game_info.get("is_postseason"):
         og_title = f"{game_info.get('postseason_label') or '가을야구'} {game_info.get('matchup') or ''}".strip()
         og_description = " ".join(
             part
