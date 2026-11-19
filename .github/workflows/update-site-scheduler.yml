@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
@@ -39,7 +39,7 @@ jobs:
         run: git pull --rebase origin ${{ github.ref_name }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -58,7 +58,19 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore: refresh next Hanwha game preview [skip site ci]"
-            git push origin ${{ github.ref_name }}
+            ref="${{ github.ref_name }}"
+            for attempt in 1 2 3; do
+              if ! git pull --rebase origin "$ref"; then
+                git checkout --theirs -- index.html thumbnail.png game-data.json holiday-data.json
+                git add index.html thumbnail.png game-data.json holiday-data.json
+                GIT_EDITOR=true git rebase --continue
+              fi
+              if git push origin "$ref"; then
+                exit 0
+              fi
+              echo "Push rejected on attempt ${attempt}; rebasing onto latest main"
+            done
+            exit 1
           fi
 
       - name: Queue next run (half-hour cadence, UTC :00 / :30)
