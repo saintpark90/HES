@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 import xml.etree.ElementTree as ET
 import time
 from zoneinfo import ZoneInfo
@@ -1976,27 +1977,163 @@ def _naver_get(
     return response
 
 
+def _json_object_at(text: str, start: int) -> str:
+    depth = 0
+    in_string = False
+    escape = False
+    for pos in range(start, len(text)):
+        char = text[pos]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : pos + 1]
+    return ""
+
+
+def _plain_news_title(value: str) -> str:
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"</?mark>", "", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _news_thumbnail(url: str) -> str:
+    raw = str(url or "").strip()
+    if "src=" not in raw:
+        return raw
+    source = unquote(parse_qs(urlparse(raw).query).get("src", [""])[0])
+    return source if source.startswith("http") else raw
+
+
+def _published_at_from_label(label: str) -> str:
+    text = str(label or "").strip()
+    now = datetime.now(KST).replace(microsecond=0)
+    minute = re.fullmatch(r"(\d+)\s*분\s*전", text)
+    if minute:
+        return (now - timedelta(minutes=int(minute.group(1)))).isoformat()
+    hour = re.fullmatch(r"(\d+)\s*시간\s*전", text)
+    if hour:
+        return (now - timedelta(hours=int(hour.group(1)))).isoformat()
+    day = re.fullmatch(r"(\d+)\s*일\s*전", text)
+    if day:
+        return (now - timedelta(days=int(day.group(1)))).isoformat()
+    if text in {"방금 전", "조금 전"}:
+        return now.isoformat()
+    if text == "어제":
+        return (now - timedelta(days=1)).isoformat()
+    dated = re.fullmatch(r"(\d{4})\.(\d{1,2})\.(\d{1,2})\.?", text)
+    if dated:
+        stamp = datetime(
+            int(dated.group(1)),
+            int(dated.group(2)),
+            int(dated.group(3)),
+            tzinfo=KST,
+        )
+        return stamp.isoformat()
+    return ""
+
+
+def _naver_search_feed(query: str) -> list[Dict[str, str]]:
+    """뉴스 검색 페이지의 카드에서 제목, 언론사, 시간, 사진을 읽는다."""
+    try:
+        response = _naver_get(
+            "https://search.naver.com/search.naver",
+            params={"where": "news", "query": query, "sort": "1", "pd": "1"},
+            timeout=20,
+        )
+    except Exception:
+        return []
+    html_text = response.text
+    marker = "entry.bootstrap(document.getElementById("
+    marker_at = html_text.find(marker)
+    if marker_at < 0:
+        return []
+    object_at = html_text.find("{", marker_at)
+    if object_at < 0:
+        return []
+    try:
+        payload = json.loads(_json_object_at(html_text, object_at))
+    except Exception:
+        return []
+
+    cards: list[Dict[str, Any]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if "sourceProfile" in node and "title" in node:
+                cards.append(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(payload)
+    result: list[Dict[str, str]] = []
+    for card in cards:
+        profile = card.get("sourceProfile") if isinstance(card.get("sourceProfile"), dict) else {}
+        subs = profile.get("subTexts") if isinstance(profile.get("subTexts"), list) else []
+        url = str(card.get("titleHref") or "").strip()
+        published = ""
+        for sub in subs:
+            if not isinstance(sub, dict):
+                continue
+            href = str(sub.get("textHref") or "")
+            if "sports.naver.com" in href and "/article/" in href:
+                url = href
+            if not published:
+                published = _published_at_from_label(str(sub.get("text") or ""))
+        result.append(
+            {
+                "title": _plain_news_title(str(card.get("title") or "")),
+                "url": url,
+                "thumbnail": _news_thumbnail(str(card.get("imageSrc") or "")),
+                "source_name": _plain_news_title(str(profile.get("title") or "")),
+                "published_at": published,
+            }
+        )
+    return result
+
+
+def _article_og_title(url: str) -> str:
+    try:
+        response = _naver_get(url, timeout=12)
+    except Exception:
+        return ""
+    match = re.search(r'property="og:title" content="([^"]+)"', response.text)
+    if not match:
+        return ""
+    return _plain_news_title(match.group(1))
+
+
 def _fetch_hanwha_news_from_search(limit: int) -> list[Dict[str, str]]:
     """팀 뉴스 API가 비면 네이버 뉴스 검색으로 한화 기사를 채운다."""
     result: list[Dict[str, str]] = []
     seen: set[str] = set()
-    for card in _search_news_cards("한화 이글스"):
-        title = str(card.get("title") or "").strip()
-        url = str(card.get("url") or "").strip()
-        if not title or not url or url in seen:
+    for card in _naver_search_feed("한화 이글스"):
+        title = card["title"]
+        url = card["url"]
+        if not title or not url or url in seen or "/wbaseball/" in url:
             continue
         if "한화" not in title and "이글스" not in title:
             continue
+        if title.endswith("...") or title.endswith("…"):
+            full_title = _article_og_title(url)
+            if full_title:
+                card["title"] = full_title
         seen.add(url)
-        result.append(
-            {
-                "title": title,
-                "url": url,
-                "thumbnail": "",
-                "source_name": "",
-                "published_at": "",
-            }
-        )
+        result.append(card)
         if len(result) >= limit:
             break
     return result
@@ -2021,6 +2158,7 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
         "Origin": "https://m.sports.naver.com",
     }
     payload = None
+    last_error: Optional[Exception] = None
     for _ in range(3):
         try:
             response = _naver_get(
@@ -2031,9 +2169,11 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
             )
             payload = response.json()
             break
-        except Exception:
+        except Exception as exc:
             payload = None
+            last_error = exc
     if not isinstance(payload, dict):
+        print(f"hanwha news api unavailable: {last_error}")
         return _fetch_hanwha_news_from_search(limit)
 
     news_list = ((payload.get("result") or {}).get("newsList") or [])[:limit]
@@ -2053,7 +2193,10 @@ def _fetch_latest_hanwha_news(limit: int = 5) -> list[Dict[str, str]]:
                 "published_at": str(item.get("dateTime", "") or "").strip(),
             }
         )
-    return result or _fetch_hanwha_news_from_search(limit)
+    if result:
+        return result
+    print("hanwha news api returned no articles; using search")
+    return _fetch_hanwha_news_from_search(limit)
 
 
 def _fetch_player_profile_for_register(name: str) -> Dict[str, str]:

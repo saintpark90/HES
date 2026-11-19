@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -146,14 +146,62 @@ def _news_quality(items: list) -> int:
     return score
 
 
+def _published_stamp(value: str):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        stamp = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=KST)
+    return stamp.astimezone(KST)
+
+
+def _news_identity(item: dict) -> str:
+    url = str(item.get("url") or "").split("?")[0].rstrip("/")
+    marker = "/article/"
+    at = url.find(marker)
+    return url[at + len(marker) :] if at >= 0 else url
+
+
 def _merge_news_and_highlight_fallbacks(current_info: dict, previous_info: dict) -> dict:
-    """스케줄 수집이 뉴스·수상 예상을 비우면 직전 스냅샷을 유지한다."""
+    """수집이 비거나 같은 기사면 직전 뉴스를 유지하고, 더 최근 기사가 있으면 교체한다."""
     if not current_info:
         return current_info
     merged = dict(current_info)
     current_news = merged.get("latest_news") if isinstance(merged.get("latest_news"), list) else []
     previous_news = previous_info.get("latest_news") if isinstance(previous_info.get("latest_news"), list) else []
-    if _news_quality(previous_news) > _news_quality(current_news):
+    previous_ids = {_news_identity(item) for item in previous_news if isinstance(item, dict)}
+    previous_stamps = [
+        _published_stamp(item.get("published_at"))
+        for item in previous_news
+        if isinstance(item, dict)
+    ]
+    previous_stamps = [stamp for stamp in previous_stamps if stamp is not None]
+    previous_newest = max(previous_stamps) if previous_stamps else None
+    new_stamps = [
+        _published_stamp(item.get("published_at"))
+        for item in current_news
+        if isinstance(item, dict) and _news_identity(item) not in previous_ids
+    ]
+    new_stamps = [stamp for stamp in new_stamps if stamp is not None]
+    newest_new = max(new_stamps) if new_stamps else None
+    current_has_time = any(
+        isinstance(item, dict) and item.get("published_at") for item in current_news
+    )
+    has_newer_article = bool(
+        newest_new and previous_newest and newest_new > previous_newest + timedelta(minutes=10)
+    ) or bool(newest_new and previous_newest is None)
+    keep_previous = False
+    if not current_news or (previous_news and not current_has_time):
+        keep_previous = True
+    elif has_newer_article:
+        keep_previous = False
+    elif _news_quality(previous_news) >= _news_quality(current_news) and previous_news:
+        keep_previous = True
+    if keep_previous and previous_news:
         merged["latest_news"] = previous_news
     if _highlight_score(previous_info.get("player_highlights")) > _highlight_score(merged.get("player_highlights")):
         merged["player_highlights"] = previous_info.get("player_highlights")
