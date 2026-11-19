@@ -2793,12 +2793,12 @@ const renderGame = (g, refreshedAt) => {
     document.title = "한화 이글스 스토브리그";
     container.innerHTML = `
       <div class="updated-at">마지막 갱신: ${formatUpdatedAt(refreshedAt)}</div>
-      ${renderWeatherSection(g)}
+      ${renderFaSection(g)}
       ${renderPlayerHighlightsSection(g)}
+      ${renderLatestNewsSection(g)}
+      ${renderWeatherSection(g)}
       ${renderTeamRankings(g.team_rankings, g.team_rank_date, { finalSeason: g.season_id || "" })}
       ${renderPostseasonResults(g)}
-      ${renderFaSection(g)}
-      ${renderLatestNewsSection(g)}
     `;
     bindScheduleCalendarEvents();
     bindSunShadowEvents();
