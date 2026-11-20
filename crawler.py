@@ -6826,6 +6826,13 @@ def _fetch_fa_players() -> Dict[str, Any]:
             "note": "KBO가 공시한 FA 승인 선수입니다. 승인 선수는 공시 다음 날부터 협상할 수 있습니다.",
         }
 
+    roster_url = "https://www.etoday.co.kr/news/view/2648940"
+    roster_title = "2027 프로야구 FA 협상 시작…‘1호 계약’ 주인공은 누구?"
+    roster_text = _fetch_article_text(roster_url)
+    roster = accept(_parse_fa_article_text(roster_text), roster_url, roster_title, roster_text)
+    if roster:
+        return _enrich_fa_market(roster)
+
     seen_urls: set[str] = set()
     for query in ("FA 승인 선수 명단 원태인(A) 구자욱(A)", "KBO FA 승인 선수 명단 공시"):
         for card in _search_news_cards(query)[:8]:

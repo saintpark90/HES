@@ -166,6 +166,25 @@ def _news_identity(item: dict) -> str:
     return url[at + len(marker) :] if at >= 0 else url
 
 
+def _fa_player_count(info: dict) -> int:
+    fa = info.get("fa_players")
+    if not isinstance(fa, dict):
+        return 0
+    players = fa.get("players")
+    return len(players) if isinstance(players, list) else 0
+
+
+def _merge_fa_fallback(current_info: dict, previous_info: dict) -> dict:
+    """새 수집이 승인 명단을 비우면 직전 명단을 유지한다."""
+    if not current_info:
+        return current_info
+    if _fa_player_count(current_info) >= 15 or _fa_player_count(previous_info) < 15:
+        return current_info
+    merged = dict(current_info)
+    merged["fa_players"] = previous_info.get("fa_players")
+    return merged
+
+
 def _merge_news_and_highlight_fallbacks(current_info: dict, previous_info: dict) -> dict:
     """수집이 비거나 같은 기사면 직전 뉴스를 유지하고, 더 최근 기사가 있으면 교체한다."""
     if not current_info:
@@ -325,6 +344,7 @@ def build() -> None:
         game_info = ensure_game_starters_from_namu(game_info)
         game_info = _merge_media_fallbacks(game_info, previous_game_info)
         game_info = _merge_news_and_highlight_fallbacks(game_info, previous_game_info)
+        game_info = _merge_fa_fallback(game_info, previous_game_info)
         game_info = _merge_starter_fallbacks(game_info, previous_game_info)
         game_info = _merge_register_moves_fallbacks(game_info, previous_game_info)
         game_info = _merge_register_moves_cache_fallback(game_info, register_moves_cache)
